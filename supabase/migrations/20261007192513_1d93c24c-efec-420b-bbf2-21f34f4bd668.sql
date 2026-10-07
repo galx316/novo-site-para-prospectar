@@ -1,0 +1,7 @@
+CREATE POLICY arquivos_storage_leitura ON storage.objects FOR SELECT TO authenticated USING(bucket_id='arquivos' AND public.is_authorized());
+CREATE POLICY arquivos_storage_envio ON storage.objects FOR INSERT TO authenticated WITH CHECK(bucket_id='arquivos' AND public.is_authorized());
+CREATE POLICY arquivos_storage_alteracao ON storage.objects FOR UPDATE TO authenticated USING(bucket_id='arquivos' AND public.is_authorized()) WITH CHECK(bucket_id='arquivos' AND public.is_authorized());
+CREATE POLICY arquivos_storage_remocao ON storage.objects FOR DELETE TO authenticated USING(bucket_id='arquivos' AND public.is_authorized());
+REVOKE ALL ON FUNCTION public.atualizar_timestamp(),public.normalizar_cliente(),public.normalizar_contato(),public.validar_oportunidade() FROM authenticated,service_role;
+DO $$ DECLARE r record; BEGIN FOR r IN SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef AND p.proname<>'validar_cadastro_autorizado' LOOP EXECUTE format('COMMENT ON FUNCTION %s IS %L',r.oid::regprocedure,'Intentional authenticated RPC or RLS predicate. Fixed search_path=public. Authorization checked before privileged operations; no anonymous or PUBLIC execute privilege.'); END LOOP; END $$;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC,anon;
