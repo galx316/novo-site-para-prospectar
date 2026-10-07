@@ -29,7 +29,7 @@ function Login() {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       const { data: authorized } = await supabase.rpc('is_authorized');
-      if (active && authorized) navigate({ to: '/' });
+      if (active && authorized) navigate({ to: '/inicio' });
     });
     return () => { active = false; };
   }, [navigate]);
@@ -46,7 +46,7 @@ function Login() {
         await supabase.auth.signOut();
         setError(checkError ? 'Não foi possível verificar seu acesso. Tente novamente.' : 'Seu e-mail não está autorizado.'); return;
       }
-      await navigate({ to: '/' });
+      await navigate({ to: '/inicio' });
     } catch { setError('Não foi possível conectar. Tente novamente.'); }
     finally { setBusy(false); }
   }

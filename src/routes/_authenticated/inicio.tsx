@@ -1,14 +1,13 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { AlertTriangle, Clock3, Loader2, LogOut, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Clock3, LogOut, RefreshCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { getAlertCounts } from '@/lib/alertas.functions';
 import { Button } from '@/components/ui/button';
 import { GalBrand } from '@/components/gal-brand';
 
-export const Route = createFileRoute('/')({
+export const Route = createFileRoute('/_authenticated/inicio')({
   head: () => ({ meta: [
     { title: 'Alertas | GAL Gestão' },
     { name: 'description', content: 'Contagem de alertas críticos e pendentes do GAL Gestão.' },
@@ -23,25 +22,14 @@ export const Route = createFileRoute('/')({
 function Index() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [signedIn, setSignedIn] = useState(false);
   const fetchCounts = useServerFn(getAlertCounts);
-  useEffect(() => {
-    let active = true;
-    supabase.auth.getUser().then(({ data }) => {
-      if (!active) return;
-      if (!data.user) navigate({ to: '/auth', replace: true });
-      else setSignedIn(true);
-    });
-    return () => { active = false; };
-  }, [navigate]);
-  const counts = useQuery({ queryKey: ['gal-alert-counts'], queryFn: () => fetchCounts(), enabled: signedIn, retry: false });
+  const counts = useQuery({ queryKey: ['gal-alert-counts'], queryFn: () => fetchCounts(), retry: false });
   async function signOut() {
     const { error } = await supabase.auth.signOut();
     if (error) return;
     queryClient.clear();
     await navigate({ to: '/auth', replace: true });
   }
-  if (!signedIn) return <main className="flex min-h-svh items-center justify-center bg-background"><Loader2 aria-label="Verificando acesso" className="animate-spin text-primary" /></main>;
   return <main className="min-h-svh bg-background">
     <header className="flex items-center justify-between border-b border-border px-6 py-6 sm:px-12"><GalBrand /><Button variant="ghost" onClick={signOut}><LogOut /> Sair</Button></header>
     <section className="mx-auto max-w-5xl px-6 py-14 sm:py-20">
