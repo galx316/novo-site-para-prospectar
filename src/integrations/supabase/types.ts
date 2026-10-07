@@ -681,12 +681,76 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_alertas: {
+        Row: {
+          data_ref: string | null
+          lote_id: string | null
+          mensagem: string | null
+          nivel: string | null
+          obra_id: string | null
+          oportunidade_id: string | null
+          tipo: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      buscar_clientes: {
+        Args: { p_limite?: number; p_texto: string }
+        Returns: {
+          id: string
+          nome: string
+          representante_prado: string
+          similaridade: number
+          situacao_prado: Database["public"]["Enums"]["situacao_prado"]
+        }[]
+      }
+      buscar_contato_por_whatsapp: { Args: { p_numero: string }; Returns: Json }
+      cancelar_followup: { Args: { p_id: string }; Returns: undefined }
+      concluir_followup: { Args: { p_id: string }; Returns: undefined }
       hoje_sp: { Args: never; Returns: string }
+      iniciar_gestao_obra: {
+        Args: { p_nome: string; p_oportunidade_id: string }
+        Returns: string
+      }
       is_authorized: { Args: never; Returns: boolean }
+      marcar_problema: {
+        Args: { p_obra_id: string; p_texto: string }
+        Returns: undefined
+      }
+      mesclar_clientes: {
+        Args: { p_manter: string; p_remover: string }
+        Returns: undefined
+      }
       normalizar_texto: { Args: { t: string }; Returns: string }
+      registrar_envio: {
+        Args: {
+          p_canal: Database["public"]["Enums"]["tipo_registro"]
+          p_contato_id: string
+          p_data_proxima?: string
+          p_oportunidade_id?: string
+          p_texto?: string
+        }
+        Returns: undefined
+      }
+      registrar_resposta: {
+        Args: {
+          p_canal: Database["public"]["Enums"]["tipo_registro"]
+          p_contato_id: string
+          p_data_proxima?: string
+          p_necessidade?: string
+          p_oportunidade_id?: string
+          p_representante?: string
+          p_situacao: string
+          p_texto?: string
+        }
+        Returns: undefined
+      }
+      remarcar_followup: {
+        Args: { p_data: string; p_id: string }
+        Returns: undefined
+      }
+      resolver_problema: { Args: { p_obra_id: string }; Returns: undefined }
       so_digitos: { Args: { t: string }; Returns: string }
       whatsapp_normalizado: { Args: { t: string }; Returns: string }
     }
