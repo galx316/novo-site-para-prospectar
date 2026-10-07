@@ -1,0 +1,2 @@
+REVOKE ALL ON FUNCTION public.validar_cadastro_autorizado() FROM authenticated,service_role;
+COMMENT ON FUNCTION public.is_authorized() IS 'Predicate intentionally executable by authenticated for RLS. Returns only current caller authorization, no arbitrary user input; fixed public search_path.';
