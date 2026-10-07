@@ -1,4 +1,5 @@
 # GAL Gestão — etapa inicial
+- [x] Corrigir falha de compilação pela dependência Supabase ausente e verificar login público.
 - [x] Criar esquema, normalização, autorização e políticas RLS.
 - [x] Criar triggers, RPCs comerciais e view de alertas.
 - [x] Criar bucket privado e suas políticas.
