@@ -314,7 +314,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
       const { data: contatosEmail, error: errEmail } = await supabase
         .from('contatos')
         .select('id, cliente_id, clientes(id, nome)')
-        .ilike('email', emailLimpo)
+        .eq('email', emailLimpo)
         .limit(1);
 
       if (errEmail) throw new Error(errEmail.message);
@@ -335,6 +335,8 @@ export const criarProspect = createServerFn({ method: 'POST' })
 
     let clienteId = data.usarClienteId;
     let clienteCriadoNestaChamadaId: string | null = null;
+    let contatoCriadoNestaChamadaId: string | null = null;
+    let oportunidadeCriadaNestaChamadaId: string | null = null;
 
     // 1. Criar construtora se não estiver usando existente
     if (!clienteId) {
@@ -379,8 +381,6 @@ export const criarProspect = createServerFn({ method: 'POST' })
     }
 
     // Bloco para criação de contato, oportunidade e envio.
-    // Se o contato ou a oportunidade falharem depois de criar uma construtora nova nesta mesma chamada,
-    // apague essa construtora nova antes de retornar o erro.
     try {
       // 2. Criar contato
       const { data: novoContato, error: contatoErr } = await supabase
@@ -398,6 +398,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
       if (contatoErr) {
         throw new Error(contatoErr.message);
       }
+      contatoCriadoNestaChamadaId = novoContato.id;
 
       // 3. Criar oportunidade
       if (!data.marcaIds || data.marcaIds.length === 0) {
@@ -417,6 +418,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
         .single();
 
       if (opErr) throw new Error(opErr.message);
+      oportunidadeCriadaNestaChamadaId = novaOp.id;
 
       // 4. Se já enviou a apresentação, registrar o envio chamando a RPC registrar_envio
       if (data.jaEnviouApresentacao) {
@@ -438,10 +440,64 @@ export const criarProspect = createServerFn({ method: 'POST' })
         oportunidadeId: novaOp.id,
       };
     } catch (err: any) {
-      if (clienteCriadoNestaChamadaId) {
-        await supabase.from('clientes').delete().eq('id', clienteCriadoNestaChamadaId);
+      const errosRollback: string[] = [];
+
+      // Apague nesta ordem: followups e registros do contato criado, a oportunidade criada, o contato criado e por último a construtora criada.
+      // Só apague o que foi criado nesta chamada.
+      // Confira o erro de cada delete. Se algum falhar, inclua isso na mensagem de erro retornada.
+      if (contatoCriadoNestaChamadaId) {
+        const { error: errDelFollowups } = await supabase
+          .from('followups')
+          .delete()
+          .eq('contato_id', contatoCriadoNestaChamadaId);
+        if (errDelFollowups) {
+          errosRollback.push(`Falha ao remover follow-ups: ${errDelFollowups.message}`);
+        }
+
+        const { error: errDelRegistros } = await supabase
+          .from('registros')
+          .delete()
+          .eq('contato_id', contatoCriadoNestaChamadaId);
+        if (errDelRegistros) {
+          errosRollback.push(`Falha ao remover registros: ${errDelRegistros.message}`);
+        }
       }
-      throw err;
+
+      if (oportunidadeCriadaNestaChamadaId) {
+        const { error: errDelOp } = await supabase
+          .from('oportunidades')
+          .delete()
+          .eq('id', oportunidadeCriadaNestaChamadaId);
+        if (errDelOp) {
+          errosRollback.push(`Falha ao remover oportunidade: ${errDelOp.message}`);
+        }
+      }
+
+      if (contatoCriadoNestaChamadaId) {
+        const { error: errDelContato } = await supabase
+          .from('contatos')
+          .delete()
+          .eq('id', contatoCriadoNestaChamadaId);
+        if (errDelContato) {
+          errosRollback.push(`Falha ao remover contato: ${errDelContato.message}`);
+        }
+      }
+
+      if (clienteCriadoNestaChamadaId) {
+        const { error: errDelCliente } = await supabase
+          .from('clientes')
+          .delete()
+          .eq('id', clienteCriadoNestaChamadaId);
+        if (errDelCliente) {
+          errosRollback.push(`Falha ao remover construtora: ${errDelCliente.message}`);
+        }
+      }
+
+      const mensagemBase = err?.message || 'Erro ao criar prospect.';
+      if (errosRollback.length > 0) {
+        throw new Error(`${mensagemBase} (Erros no rollback: ${errosRollback.join('; ')})`);
+      }
+      throw new Error(mensagemBase);
     }
   });
 
