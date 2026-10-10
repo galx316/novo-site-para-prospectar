@@ -30,9 +30,8 @@ function Index() {
     queryClient.clear();
     await navigate({ to: '/auth', replace: true });
   }
-  return <main className="min-h-svh bg-background">
-    <header className="flex items-center justify-between border-b border-border px-6 py-6 sm:px-12"><GalBrand /><Button variant="ghost" onClick={signOut}><LogOut /> Sair</Button></header>
-    <section className="mx-auto max-w-5xl px-6 py-14 sm:py-20">
+  return <main className="bg-background">
+    <section className="mx-auto max-w-5xl px-6 py-8 sm:py-12">
       <div className="mb-10 flex items-end justify-between gap-4"><div><p className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">Visão geral</p><h1 className="text-3xl font-semibold">Alertas</h1><p className="mt-3 text-sm text-muted-foreground">{new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long', timeZone: 'America/Sao_Paulo' }).format(new Date())}</p></div><Button variant="outline" size="icon" title="Atualizar alertas" aria-label="Atualizar alertas" disabled={counts.isFetching} onClick={() => counts.refetch()}><RefreshCw className={counts.isFetching ? 'animate-spin' : ''} /></Button></div>
       {counts.isError ? <div role="alert" className="border-l-2 border-destructive py-3 pl-4"><p className="text-sm text-destructive">{counts.error.message}</p><Button variant="link" className="mt-2 px-0" onClick={() => counts.refetch()}>Tentar novamente</Button></div> : <div className="grid gap-6 sm:grid-cols-2">
         <article className="rounded-lg border border-border bg-card p-7"><div className="flex items-center justify-between"><h2 className="font-medium">Críticos</h2><AlertTriangle className="text-destructive" size={21} /></div><p className="mt-9 min-h-16 text-5xl font-semibold tabular-nums">{counts.isPending ? '—' : counts.data.critico}</p><p className="mt-3 text-sm text-muted-foreground">Nível crítico</p></article>
