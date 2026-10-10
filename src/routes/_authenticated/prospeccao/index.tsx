@@ -493,7 +493,7 @@ function ProspeccaoPage() {
             contatoId={prospectSelecionado.contato_principal?.id}
             contatoNome={prospectSelecionado.contato_principal?.nome}
             clienteNome={prospectSelecionado.nome}
-            oportunidadeId={prospectSelecionado.oportunidade_principal?.id}
+            oportunidades={prospectSelecionado.oportunidades}
             atalhosDias={atalhosDias}
             onSuccess={() => refetch()}
           />
@@ -504,7 +504,7 @@ function ProspeccaoPage() {
             contatoId={prospectSelecionado.contato_principal?.id}
             contatoNome={prospectSelecionado.contato_principal?.nome}
             clienteNome={prospectSelecionado.nome}
-            oportunidadeId={prospectSelecionado.oportunidade_principal?.id}
+            oportunidades={prospectSelecionado.oportunidades}
             onSuccess={() => refetch()}
           />
 

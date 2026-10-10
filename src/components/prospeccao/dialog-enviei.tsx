@@ -18,13 +18,20 @@ import type { Database } from '@/integrations/supabase/types';
 
 type TipoRegistro = Database['public']['Enums']['tipo_registro'];
 
+export interface OportunidadeItem {
+  id: string;
+  contato_id?: string | null;
+  descricao?: string | null;
+  marcas?: Array<{ id: string; nome: string; [key: string]: any }> | null;
+}
+
 interface DialogEnvieiProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  contatoId: string;
+  contatoId?: string;
   contatoNome?: string;
   clienteNome?: string;
-  oportunidadeId?: string;
+  oportunidades?: OportunidadeItem[];
   atalhosDias?: number[];
   onSuccess: () => void;
 }
@@ -35,7 +42,7 @@ export function DialogEnviei({
   contatoId,
   contatoNome,
   clienteNome,
-  oportunidadeId,
+  oportunidades = [],
   atalhosDias = [3, 7, 15, 30],
   onSuccess,
 }: DialogEnvieiProps) {
@@ -45,9 +52,17 @@ export function DialogEnviei({
   const [modoEscolherData, setModoEscolherData] = useState(false);
   const [carregando, setCarregando] = useState(false);
 
+  // Mostre só as oportunidades do contato escolhido ou sem contato (contato_id nulo).
+  // Nunca envie oportunidade de outro contato.
+  const oportunidadesValidas = (oportunidades || []).filter(
+    (op) => !op.contato_id || (contatoId && op.contato_id === contatoId)
+  );
+
+  const [oportunidadeSelecionadaId, setOportunidadeSelecionadaId] = useState<string>('');
+
   const executarEnvio = useServerFn(registrarEnvio);
 
-  // Inicializar com o primeiro atalho (ex: +3 ou +5 dias)
+  // Inicializar com o primeiro atalho e a oportunidade padrão
   useEffect(() => {
     if (open) {
       const primeiroAtalho = atalhosDias?.[0] || 5;
@@ -55,8 +70,13 @@ export function DialogEnviei({
       setModoEscolherData(false);
       setTexto('');
       setCanal('whatsapp');
+      if (oportunidadesValidas.length > 0) {
+        setOportunidadeSelecionadaId(oportunidadesValidas[0]?.id || '');
+      } else {
+        setOportunidadeSelecionadaId('');
+      }
     }
-  }, [open, atalhosDias]);
+  }, [open, atalhosDias, contatoId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -65,13 +85,23 @@ export function DialogEnviei({
       return;
     }
 
+    // Se houver só uma, use essa sem perguntar.
+    // Se houver mais de uma, use a selecionada.
+    // Se não houver nenhuma, envie sem oportunidade.
+    const oportunidadeFinalId =
+      oportunidadesValidas.length === 1
+        ? oportunidadesValidas[0]?.id
+        : oportunidadesValidas.length > 1
+          ? (oportunidadeSelecionadaId || oportunidadesValidas[0]?.id || undefined)
+          : undefined;
+
     setCarregando(true);
     try {
       await executarEnvio({
         data: {
           contatoId,
           canal,
-          oportunidadeId: oportunidadeId || undefined,
+          oportunidadeId: oportunidadeFinalId || undefined,
           texto: texto.trim() || undefined,
           dataProxima: dataProxima || undefined,
         },
@@ -105,6 +135,33 @@ export function DialogEnviei({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-5 pt-2">
+          {/* Seletor de Oportunidade (mostrado se houver mais de uma válida) */}
+          {oportunidadesValidas.length > 1 && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
+                Oportunidade vinculada
+              </label>
+              <select
+                value={oportunidadeSelecionadaId}
+                onChange={(e) => setOportunidadeSelecionadaId(e.target.value)}
+                className="w-full h-11 px-3 rounded-lg border border-input bg-card text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                {oportunidadesValidas.map((op) => {
+                  const marcasNomes = (op.marcas || []).map((m) => m.nome).filter(Boolean).join(', ');
+                  const rotulo =
+                    marcasNomes && op.descricao
+                      ? `${marcasNomes} — ${op.descricao}`
+                      : marcasNomes || op.descricao || 'Oportunidade comercial';
+                  return (
+                    <option key={op.id} value={op.id}>
+                      {rotulo}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
           {/* Escolha do Canal */}
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">

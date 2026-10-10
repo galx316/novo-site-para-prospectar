@@ -303,7 +303,7 @@ export function DialogNovoProspect({
                     }}
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    Abrir cadastro existente
+                    Abrir ficha
                   </Button>
                 )}
               </div>

@@ -17,13 +17,13 @@ async function assertAuthorized(supabase: any) {
  */
 export const listarProspects = createServerFn({ method: 'GET' })
   .middleware([requireSupabaseAuth])
-  .validator((data: {
-    texto?: string;
-    marcaId?: string;
-    etapa?: string;
-    apenasOutroRep?: boolean;
-    apenasSemProximoPasso?: boolean;
-  }) => data)
+  .validator((data?: {
+    texto?: string | undefined;
+    marcaId?: string | undefined;
+    etapa?: string | undefined;
+    apenasOutroRep?: boolean | undefined;
+    apenasSemProximoPasso?: boolean | undefined;
+  } | undefined) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     await assertAuthorized(supabase);
@@ -96,6 +96,7 @@ export const listarProspects = createServerFn({ method: 'GET' })
     // Agrupar contatos por cliente_id
     const contatosPorCliente = new Map<string, any[]>();
     for (const c of contatosRes.data || []) {
+      if (!c.cliente_id) continue;
       const list = contatosPorCliente.get(c.cliente_id) || [];
       list.push(c);
       contatosPorCliente.set(c.cliente_id, list);
@@ -104,6 +105,7 @@ export const listarProspects = createServerFn({ method: 'GET' })
     // Agrupar oportunidades por cliente_id e enriquecer com marcas
     const opsPorCliente = new Map<string, any[]>();
     for (const op of oportunidadesRes.data || []) {
+      if (!op.cliente_id) continue;
       const opMarcas = (op.marca_ids || []).map((id: string) => marcasMap.get(id)).filter(Boolean);
       const list = opsPorCliente.get(op.cliente_id) || [];
       list.push({ ...op, marcas: opMarcas });
@@ -113,6 +115,7 @@ export const listarProspects = createServerFn({ method: 'GET' })
     // Agrupar follow-up pendente mais próximo por cliente_id
     const followupPorCliente = new Map<string, any>();
     for (const f of followupsRes.data || []) {
+      if (!f.cliente_id) continue;
       if (!followupPorCliente.has(f.cliente_id)) {
         followupPorCliente.set(f.cliente_id, f);
       }
@@ -243,7 +246,7 @@ export const obterFichaCliente = createServerFn({ method: 'GET' })
  */
 export const buscarClientesRPC = createServerFn({ method: 'GET' })
   .middleware([requireSupabaseAuth])
-  .validator((data: { texto: string; limite?: number }) => data)
+  .validator((data: { texto: string; limite?: number | undefined }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     await assertAuthorized(supabase);
@@ -262,27 +265,76 @@ export const buscarClientesRPC = createServerFn({ method: 'GET' })
 export const criarProspect = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
   .validator((data: {
-    usarClienteId?: string;
-    nomeCliente?: string;
-    cidade?: string;
-    uf?: string;
+    usarClienteId?: string | undefined;
+    nomeCliente?: string | undefined;
+    cidade?: string | undefined;
+    uf?: string | undefined;
     nomeContato: string;
-    cargo?: string;
-    whatsapp?: string;
-    email?: string;
+    cargo?: string | undefined;
+    whatsapp?: string | undefined;
+    email?: string | undefined;
     marcaIds: string[];
-    descricao?: string;
-    situacaoPrado?: SituacaoPrado;
-    representantePrado?: string;
-    jaEnviouApresentacao?: boolean;
-    canalEnvio?: TipoRegistro;
-    dataProximaEnvio?: string;
+    descricao?: string | undefined;
+    situacaoPrado?: SituacaoPrado | undefined;
+    representantePrado?: string | undefined;
+    jaEnviouApresentacao?: boolean | undefined;
+    canalEnvio?: TipoRegistro | undefined;
+    dataProximaEnvio?: string | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     await assertAuthorized(supabase);
 
+    const whatsappLimpo = data.whatsapp?.trim();
+    const emailLimpo = data.email?.trim()?.toLowerCase();
+
+    // 0. Antes de criar a construtora, confira se o WhatsApp já existe (rpc buscar_contato_por_whatsapp)
+    // e se o e-mail já existe (select em contatos por email em minúsculas).
+    if (whatsappLimpo) {
+      const { data: respWa, error: errWa } = await supabase.rpc('buscar_contato_por_whatsapp', {
+        p_numero: whatsappLimpo,
+      });
+      if (errWa) throw new Error(errWa.message);
+      if (respWa && typeof respWa === 'object') {
+        const info = respWa as any;
+        const clienteExistente = info.cliente;
+        const clienteNome = clienteExistente?.nome || 'Construtora já cadastrada';
+        const clienteIdExistente = clienteExistente?.id || info.contato?.cliente_id;
+        return {
+          success: false,
+          erro: 'contato_duplicado',
+          mensagem: `Este WhatsApp já está cadastrado para o contato da construtora "${clienteNome}".`,
+          clienteExistenteId: clienteIdExistente,
+          clienteNome,
+        };
+      }
+    }
+
+    if (emailLimpo) {
+      const { data: contatosEmail, error: errEmail } = await supabase
+        .from('contatos')
+        .select('id, cliente_id, clientes(id, nome)')
+        .ilike('email', emailLimpo)
+        .limit(1);
+
+      if (errEmail) throw new Error(errEmail.message);
+      if (contatosEmail && contatosEmail.length > 0) {
+        const contatoExistente = contatosEmail[0] as any;
+        const clienteExistente = contatoExistente.clientes;
+        const clienteNome = clienteExistente?.nome || 'Construtora já cadastrada';
+        const clienteIdExistente = clienteExistente?.id || contatoExistente.cliente_id;
+        return {
+          success: false,
+          erro: 'contato_duplicado',
+          mensagem: `Este e-mail já está cadastrado para o contato da construtora "${clienteNome}".`,
+          clienteExistenteId: clienteIdExistente,
+          clienteNome,
+        };
+      }
+    }
+
     let clienteId = data.usarClienteId;
+    let clienteCriadoNestaChamadaId: string | null = null;
 
     // 1. Criar construtora se não estiver usando existente
     if (!clienteId) {
@@ -295,6 +347,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
         .from('clientes')
         .insert({
           nome: nomeLimpo,
+          nome_normalizado: nomeLimpo,
           cidade: data.cidade?.trim() || null,
           uf: data.uf?.trim()?.toUpperCase() || null,
           situacao_prado: data.situacaoPrado || 'nao_verificado',
@@ -306,7 +359,6 @@ export const criarProspect = createServerFn({ method: 'POST' })
       if (clienteErr) {
         // Código 23505 = violação de chave única (nome_normalizado)
         if (clienteErr.code === '23505') {
-          // Procurar o cadastro existente para exibir link amigável
           const { data: existentes } = await supabase.rpc('buscar_clientes', {
             p_texto: nomeLimpo,
             p_limite: 1,
@@ -323,87 +375,74 @@ export const criarProspect = createServerFn({ method: 'POST' })
       }
 
       clienteId = novoCliente.id;
+      clienteCriadoNestaChamadaId = novoCliente.id;
     }
 
-    // 2. Criar contato
-    const { data: novoContato, error: contatoErr } = await supabase
-      .from('contatos')
-      .insert({
-        cliente_id: clienteId,
-        nome: data.nomeContato.trim(),
-        cargo: data.cargo?.trim() || null,
-        whatsapp: data.whatsapp?.trim() || null,
-        email: data.email?.trim() || null,
-      })
-      .select()
-      .single();
+    // Bloco para criação de contato, oportunidade e envio.
+    // Se o contato ou a oportunidade falharem depois de criar uma construtora nova nesta mesma chamada,
+    // apague essa construtora nova antes de retornar o erro.
+    try {
+      // 2. Criar contato
+      const { data: novoContato, error: contatoErr } = await supabase
+        .from('contatos')
+        .insert({
+          cliente_id: clienteId,
+          nome: data.nomeContato.trim(),
+          cargo: data.cargo?.trim() || null,
+          whatsapp: data.whatsapp?.trim() || null,
+          email: data.email?.trim() || null,
+        })
+        .select()
+        .single();
 
-    if (contatoErr) {
-      if (contatoErr.code === '23505') {
-        // Pode ser whatsapp único ou email único
-        let clienteVinculadoNome: string | null = null;
-        let contatoExistenteId: string | null = null;
-        if (data.whatsapp) {
-          const { data: respWa } = await supabase.rpc('buscar_contato_por_whatsapp', {
-            p_numero: data.whatsapp,
-          });
-          if (respWa && typeof respWa === 'object') {
-            const raw = respWa as any;
-            clienteVinculadoNome = raw.cliente?.nome || null;
-            contatoExistenteId = raw.contato?.id || null;
-          }
-        }
-        return {
-          success: false,
-          erro: 'contato_duplicado',
-          mensagem: clienteVinculadoNome
-            ? `Este WhatsApp já está cadastrado para o contato da construtora "${clienteVinculadoNome}".`
-            : 'Este WhatsApp ou e-mail já pertence a outro contato cadastrado.',
-          clienteExistenteId: clienteId,
-          contatoExistenteId,
-        };
+      if (contatoErr) {
+        throw new Error(contatoErr.message);
       }
-      throw new Error(contatoErr.message);
+
+      // 3. Criar oportunidade
+      if (!data.marcaIds || data.marcaIds.length === 0) {
+        throw new Error('Selecione pelo menos uma marca para a oportunidade.');
+      }
+
+      const { data: novaOp, error: opErr } = await supabase
+        .from('oportunidades')
+        .insert({
+          cliente_id: clienteId,
+          contato_id: novoContato.id,
+          marca_ids: data.marcaIds,
+          descricao: data.descricao?.trim() || null,
+          etapa: 'prospeccao',
+        })
+        .select()
+        .single();
+
+      if (opErr) throw new Error(opErr.message);
+
+      // 4. Se já enviou a apresentação, registrar o envio chamando a RPC registrar_envio
+      if (data.jaEnviouApresentacao) {
+        const canal = data.canalEnvio || 'whatsapp';
+        const { error: envioErr } = await supabase.rpc('registrar_envio', {
+          p_contato_id: novoContato.id,
+          p_canal: canal,
+          p_oportunidade_id: novaOp.id,
+          p_texto: 'Apresentação enviada no cadastro inicial.',
+          ...(data.dataProximaEnvio ? { p_data_proxima: data.dataProximaEnvio } : {}),
+        });
+        if (envioErr) throw new Error(envioErr.message);
+      }
+
+      return {
+        success: true,
+        clienteId,
+        contatoId: novoContato.id,
+        oportunidadeId: novaOp.id,
+      };
+    } catch (err: any) {
+      if (clienteCriadoNestaChamadaId) {
+        await supabase.from('clientes').delete().eq('id', clienteCriadoNestaChamadaId);
+      }
+      throw err;
     }
-
-    // 3. Criar oportunidade
-    if (!data.marcaIds || data.marcaIds.length === 0) {
-      throw new Error('Selecione pelo menos uma marca para a oportunidade.');
-    }
-
-    const { data: novaOp, error: opErr } = await supabase
-      .from('oportunidades')
-      .insert({
-        cliente_id: clienteId,
-        contato_id: novoContato.id,
-        marca_ids: data.marcaIds,
-        descricao: data.descricao?.trim() || null,
-        etapa: 'prospeccao',
-      })
-      .select()
-      .single();
-
-    if (opErr) throw new Error(opErr.message);
-
-    // 4. Se já enviou a apresentação, registrar o envio chamando a RPC registrar_envio
-    if (data.jaEnviouApresentacao) {
-      const canal = data.canalEnvio || 'whatsapp';
-      const { error: envioErr } = await supabase.rpc('registrar_envio', {
-        p_contato_id: novoContato.id,
-        p_canal: canal,
-        p_oportunidade_id: novaOp.id,
-        p_texto: 'Apresentação enviada no cadastro inicial.',
-        p_data_proxima: data.dataProximaEnvio || null,
-      });
-      if (envioErr) throw new Error(envioErr.message);
-    }
-
-    return {
-      success: true,
-      clienteId,
-      contatoId: novoContato.id,
-      oportunidadeId: novaOp.id,
-    };
   });
 
 /**
@@ -414,9 +453,9 @@ export const registrarEnvio = createServerFn({ method: 'POST' })
   .validator((data: {
     contatoId: string;
     canal: TipoRegistro;
-    oportunidadeId?: string;
-    texto?: string;
-    dataProxima?: string;
+    oportunidadeId?: string | undefined;
+    texto?: string | undefined;
+    dataProxima?: string | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -425,9 +464,9 @@ export const registrarEnvio = createServerFn({ method: 'POST' })
     const { error } = await supabase.rpc('registrar_envio', {
       p_contato_id: data.contatoId,
       p_canal: data.canal,
-      p_oportunidade_id: data.oportunidadeId || null,
-      p_texto: data.texto?.trim() || null,
-      p_data_proxima: data.dataProxima || null,
+      ...(data.oportunidadeId ? { p_oportunidade_id: data.oportunidadeId } : {}),
+      ...(data.texto?.trim() ? { p_texto: data.texto.trim() } : {}),
+      ...(data.dataProxima ? { p_data_proxima: data.dataProxima } : {}),
     });
     if (error) throw new Error(error.message);
     return { success: true };
@@ -442,11 +481,11 @@ export const registrarResposta = createServerFn({ method: 'POST' })
     contatoId: string;
     canal: TipoRegistro;
     situacao: 'tem_demanda' | 'demanda_prevista' | 'sem_demanda' | 'atendido_outro_rep_prado' | 'falar_depois' | 'sem_interesse';
-    oportunidadeId?: string;
-    necessidade?: string;
-    dataProxima?: string;
-    representante?: string;
-    texto?: string;
+    oportunidadeId?: string | undefined;
+    necessidade?: string | undefined;
+    dataProxima?: string | undefined;
+    representante?: string | undefined;
+    texto?: string | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -456,11 +495,11 @@ export const registrarResposta = createServerFn({ method: 'POST' })
       p_contato_id: data.contatoId,
       p_canal: data.canal,
       p_situacao: data.situacao,
-      p_oportunidade_id: data.oportunidadeId || null,
-      p_necessidade: data.necessidade || null,
-      p_data_proxima: data.dataProxima || null,
-      p_representante: data.representante?.trim() || null,
-      p_texto: data.texto?.trim() || null,
+      ...(data.oportunidadeId ? { p_oportunidade_id: data.oportunidadeId } : {}),
+      ...(data.necessidade ? { p_necessidade: data.necessidade } : {}),
+      ...(data.dataProxima ? { p_data_proxima: data.dataProxima } : {}),
+      ...(data.representante?.trim() ? { p_representante: data.representante.trim() } : {}),
+      ...(data.texto?.trim() ? { p_texto: data.texto.trim() } : {}),
     });
     if (error) throw new Error(error.message);
     return { success: true };
@@ -549,12 +588,12 @@ export const atualizarCliente = createServerFn({ method: 'POST' })
   .validator((data: {
     id: string;
     nome: string;
-    cidade?: string;
-    uf?: string;
-    cnpj?: string;
-    observacoes?: string;
+    cidade?: string | undefined;
+    uf?: string | undefined;
+    cnpj?: string | undefined;
+    observacoes?: string | undefined;
     situacaoPrado: SituacaoPrado;
-    representantePrado?: string;
+    representantePrado?: string | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -585,10 +624,10 @@ export const adicionarContato = createServerFn({ method: 'POST' })
   .validator((data: {
     clienteId: string;
     nome: string;
-    cargo?: string;
-    whatsapp?: string;
-    email?: string;
-    observacoes?: string;
+    cargo?: string | undefined;
+    whatsapp?: string | undefined;
+    email?: string | undefined;
+    observacoes?: string | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;

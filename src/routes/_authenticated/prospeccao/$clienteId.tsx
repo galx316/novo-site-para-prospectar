@@ -821,7 +821,7 @@ function FichaClientePage() {
         contatoId={contatoSelecionado?.id || contatos[0]?.id}
         contatoNome={contatoSelecionado?.nome || contatos[0]?.nome}
         clienteNome={cliente.nome}
-        oportunidadeId={oportunidades[0]?.id}
+        oportunidades={oportunidades}
         atalhosDias={atalhosDias}
         onSuccess={() => refetch()}
       />
@@ -832,7 +832,7 @@ function FichaClientePage() {
         contatoId={contatoSelecionado?.id || contatos[0]?.id}
         contatoNome={contatoSelecionado?.nome || contatos[0]?.nome}
         clienteNome={cliente.nome}
-        oportunidadeId={oportunidades[0]?.id}
+        oportunidades={oportunidades}
         onSuccess={() => refetch()}
       />
 

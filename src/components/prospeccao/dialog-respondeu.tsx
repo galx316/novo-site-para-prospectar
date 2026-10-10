@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useServerFn } from '@tanstack/react-start';
 import { registrarResposta } from '@/lib/prospeccao.functions';
 import { adicionarDiasSP, obterHojeSP } from '@/lib/date-utils';
@@ -38,13 +38,20 @@ type SituacaoResposta =
   | 'falar_depois'
   | 'sem_interesse';
 
+export interface OportunidadeItem {
+  id: string;
+  contato_id?: string | null;
+  descricao?: string | null;
+  marcas?: Array<{ id: string; nome: string; [key: string]: any }> | null;
+}
+
 interface DialogRespondeuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  contatoId: string;
+  contatoId?: string;
   contatoNome?: string;
   clienteNome?: string;
-  oportunidadeId?: string;
+  oportunidades?: OportunidadeItem[];
   onSuccess: () => void;
 }
 
@@ -54,7 +61,7 @@ export function DialogRespondeu({
   contatoId,
   contatoNome,
   clienteNome,
-  oportunidadeId,
+  oportunidades = [],
   onSuccess,
 }: DialogRespondeuProps) {
   const [canal, setCanal] = useState<TipoRegistro>('whatsapp');
@@ -65,7 +72,25 @@ export function DialogRespondeu({
   const [texto, setTexto] = useState('');
   const [carregando, setCarregando] = useState(false);
 
+  // Mostre só as oportunidades do contato escolhido ou sem contato (contato_id nulo).
+  // Nunca envie oportunidade de outro contato.
+  const oportunidadesValidas = (oportunidades || []).filter(
+    (op) => !op.contato_id || (contatoId && op.contato_id === contatoId)
+  );
+
+  const [oportunidadeSelecionadaId, setOportunidadeSelecionadaId] = useState<string>('');
+
   const executarResposta = useServerFn(registrarResposta);
+
+  useEffect(() => {
+    if (open) {
+      if (oportunidadesValidas.length > 0) {
+        setOportunidadeSelecionadaId(oportunidadesValidas[0]?.id || '');
+      } else {
+        setOportunidadeSelecionadaId('');
+      }
+    }
+  }, [open, contatoId]);
 
   const opcoesSituacao: {
     key: SituacaoResposta;
@@ -146,6 +171,16 @@ export function DialogRespondeu({
       }
     }
 
+    // Se houver só uma, use essa sem perguntar.
+    // Se houver mais de uma, use a selecionada.
+    // Se não houver nenhuma, envie sem oportunidade.
+    const oportunidadeFinalId =
+      oportunidadesValidas.length === 1
+        ? oportunidadesValidas[0]?.id
+        : oportunidadesValidas.length > 1
+          ? (oportunidadeSelecionadaId || oportunidadesValidas[0]?.id || undefined)
+          : undefined;
+
     setCarregando(true);
     try {
       // Converte YYYY-MM para YYYY-MM-01
@@ -157,7 +192,7 @@ export function DialogRespondeu({
           contatoId,
           canal,
           situacao,
-          oportunidadeId: oportunidadeId || undefined,
+          oportunidadeId: oportunidadeFinalId || undefined,
           necessidade: necessidadeFormatada,
           dataProxima:
             situacao === 'falar_depois'
@@ -189,15 +224,42 @@ export function DialogRespondeu({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg p-6 max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold">Registrar Resposta do Prospect</DialogTitle>
+          <DialogTitle className="text-xl font-semibold">Registrar Resposta do Cliente</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
             {clienteNome && <span className="font-semibold text-foreground">{clienteNome}</span>}
             {contatoNome && ` • Contato: ${contatoNome}`}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-5 pt-1">
-          {/* Canal da resposta */}
+        <form onSubmit={handleSubmit} className="space-y-5 pt-2">
+          {/* Seletor de Oportunidade (mostrado se houver mais de uma válida) */}
+          {oportunidadesValidas.length > 1 && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
+                Oportunidade vinculada
+              </label>
+              <select
+                value={oportunidadeSelecionadaId}
+                onChange={(e) => setOportunidadeSelecionadaId(e.target.value)}
+                className="w-full h-11 px-3 rounded-lg border border-input bg-card text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                {oportunidadesValidas.map((op) => {
+                  const marcasNomes = (op.marcas || []).map((m) => m.nome).filter(Boolean).join(', ');
+                  const rotulo =
+                    marcasNomes && op.descricao
+                      ? `${marcasNomes} — ${op.descricao}`
+                      : marcasNomes || op.descricao || 'Oportunidade comercial';
+                  return (
+                    <option key={op.id} value={op.id}>
+                      {rotulo}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
+          {/* Escolha do Canal de Retorno */}
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
               Canal da resposta
@@ -213,7 +275,7 @@ export function DialogRespondeu({
                     onClick={() => setCanal(c.tipo)}
                     className={`flex flex-col items-center justify-center gap-1.5 h-16 rounded-lg border text-sm font-medium transition-all ${
                       selecionado
-                        ? 'border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary'
+                        ? 'border-primary bg-primary/10 text-primary font-semibold shadow-xs ring-1 ring-primary'
                         : 'border-border bg-card hover:bg-accent text-foreground'
                     }`}
                   >
@@ -225,82 +287,87 @@ export function DialogRespondeu({
             </div>
           </div>
 
-          {/* Opções de Situação */}
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
-              Qual foi a resposta?
+          {/* Opções de Situação Comercial */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
+              Qual foi o retorno do cliente? *
             </label>
             <div className="space-y-2">
               {opcoesSituacao.map((item) => {
                 const Icon = item.icon;
                 const selecionado = situacao === item.key;
                 return (
-                  <button
+                  <label
                     key={item.key}
-                    type="button"
                     onClick={() => setSituacao(item.key)}
-                    className={`w-full flex items-start gap-3 p-3.5 rounded-lg border text-left transition-all ${
+                    className={`flex items-start gap-3 p-3 rounded-xl border text-left cursor-pointer transition-all ${
                       selecionado
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary shadow-xs'
-                        : 'border-border bg-card hover:bg-accent/60'
+                        ? 'border-primary bg-primary/5 shadow-xs ring-1 ring-primary'
+                        : 'border-border bg-card hover:bg-accent/70'
                     }`}
                   >
-                    <div className={`mt-0.5 p-1 rounded-md ${selecionado ? 'bg-primary/10' : ''}`}>
-                      <Icon className={`h-5 w-5 ${item.cor}`} />
+                    <input
+                      type="radio"
+                      name="situacao"
+                      checked={selecionado}
+                      onChange={() => setSituacao(item.key)}
+                      className="sr-only"
+                    />
+                    <div className={`mt-0.5 ${item.cor}`}>
+                      <Icon className="h-5 w-5" />
                     </div>
                     <div className="flex-1">
-                      <div className="font-semibold text-sm text-foreground">{item.titulo}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{item.subtitulo}</div>
+                      <div className="text-sm font-semibold text-foreground">{item.titulo}</div>
+                      <div className="text-xs text-muted-foreground">{item.subtitulo}</div>
                     </div>
-                  </button>
+                  </label>
                 );
               })}
             </div>
           </div>
 
-          {/* Campos condicionais baseados na situação */}
+          {/* Campos específicos dependendo da situação */}
           {situacao === 'demanda_prevista' && (
-            <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20 space-y-2 animate-in fade-in">
-              <label className="text-xs font-semibold uppercase tracking-wider text-purple-900 dark:text-purple-200 block">
-                Mês e Ano da Demanda Prevista *
+            <div className="p-3.5 rounded-xl border border-purple-500/20 bg-purple-500/5 space-y-2 animate-in fade-in">
+              <label className="text-xs font-semibold text-foreground block">
+                Previsão de demanda da obra (mês e ano) *
               </label>
               <Input
                 type="month"
+                min={obterHojeSP().slice(0, 7)}
                 value={mesAnoNecessidade}
                 onChange={(e) => setMesAnoNecessidade(e.target.value)}
-                min={obterHojeSP().slice(0, 7)}
                 className="h-11 bg-card"
                 required
               />
-              <p className="text-xs text-muted-foreground">
-                O sistema programará o contato automaticamente antes do início previsto.
+              <p className="text-[11px] text-muted-foreground">
+                O sistema agendará automaticamente o follow-up com a antecedência padrão configurada.
               </p>
             </div>
           )}
 
           {situacao === 'atendido_outro_rep_prado' && (
-            <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 space-y-2 animate-in fade-in">
-              <label className="text-xs font-semibold uppercase tracking-wider text-destructive block">
-                Nome do Representante PRADO que atende *
+            <div className="p-3.5 rounded-xl border border-destructive/20 bg-destructive/5 space-y-2 animate-in fade-in">
+              <label className="text-xs font-semibold text-foreground block">
+                Nome do outro representante PRADO *
               </label>
               <Input
-                type="text"
-                placeholder="Ex: Carlos Silva / Representação XYZ"
+                placeholder="Ex: Carlos Silva"
                 value={nomeRepresentante}
                 onChange={(e) => setNomeRepresentante(e.target.value)}
                 className="h-11 bg-card"
                 required
               />
-              <p className="text-xs text-muted-foreground">
-                A construtora receberá o selo vermelho de atendimento por outro representante. Sugerimos ofertar Scalla ou Kit Porta.
+              <p className="text-[11px] text-muted-foreground">
+                Esta construtora passará a exibir o selo vermelho de atendimento por outro representante.
               </p>
             </div>
           )}
 
           {situacao === 'falar_depois' && (
-            <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 space-y-2 animate-in fade-in">
-              <label className="text-xs font-semibold uppercase tracking-wider text-blue-900 dark:text-blue-200 block">
-                Data combinada para falar novamente *
+            <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-2 animate-in fade-in">
+              <label className="text-xs font-semibold text-foreground block">
+                Data combinada para o retorno *
               </label>
               <Input
                 type="date"
@@ -313,15 +380,15 @@ export function DialogRespondeu({
             </div>
           )}
 
-          {/* Anotação complementar */}
+          {/* Anotação adicional */}
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
-              Resumo / Anotação da resposta
+              Observações adicionais (opcional)
             </label>
             <Textarea
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
-              placeholder="Ex: Conversou com o diretor de compras, informou que estão cotando empreendimento..."
+              placeholder="Detalhes sobre a conversa, perfil da construtora ou motivos informados..."
               rows={2}
               className="resize-none"
             />

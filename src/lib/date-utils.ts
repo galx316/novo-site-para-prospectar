@@ -78,7 +78,10 @@ export function obterHojeSP(): string {
  */
 export function adicionarDiasSP(dias: number, dataBase?: string): string {
   const baseStr = dataBase || obterHojeSP();
-  const [ano, mes, dia] = baseStr.split('-').map(Number);
+  const partes = baseStr.split('-').map(Number);
+  const ano = partes[0] ?? 2026;
+  const mes = partes[1] ?? 1;
+  const dia = partes[2] ?? 1;
   const data = new Date(Date.UTC(ano, mes - 1, dia));
   data.setUTCDate(data.getUTCDate() + dias);
   
@@ -106,8 +109,11 @@ export function statusData(dataStr?: string | null): 'atrasado' | 'hoje' | 'futu
 export function formatarMesAno(dataStr?: string | null): string {
   if (!dataStr) return '—';
   if (/^\d{4}-\d{2}/.test(dataStr)) {
-    const [ano, mes] = dataStr.split('-');
+    const partes = dataStr.split('-');
+    const ano = partes[0] ?? '';
+    const mes = partes[1] ?? '';
     return `${mes}/${ano}`;
   }
   return formatarData(dataStr);
 }
+
