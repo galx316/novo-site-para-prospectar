@@ -902,6 +902,10 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
       throw new Error('A oportunidade não pertence a esta construtora.');
     }
 
+    if (data.etapa && (opExistente.etapa === 'fechado' || opExistente.obra_id)) {
+      throw new Error('Esta oportunidade já virou obra. A etapa não pode ser alterada.');
+    }
+
     // 2. Se contato informado, checa se pertence a esse cliente
     if (data.contatoId) {
       const { data: contatoExistente, error: contErr } = await supabase

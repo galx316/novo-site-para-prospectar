@@ -278,6 +278,22 @@ export const cadastrarObraFechada = createServerFn({ method: 'POST' })
 
     if (marcaErr || !marcaPrado) throw new Error('Marca PRADO não encontrada.');
 
+    // Validar se contato pertence a esta construtora
+    if (data.contatoId) {
+      const { data: contatoExistente, error: contErr } = await supabase
+        .from('contatos')
+        .select('id, cliente_id')
+        .eq('id', data.contatoId)
+        .single();
+
+      if (contErr || !contatoExistente) {
+        throw new Error(contErr?.message || 'Contato não encontrado.');
+      }
+      if (contatoExistente.cliente_id !== data.clienteId) {
+        throw new Error('O contato selecionado não pertence a esta construtora.');
+      }
+    }
+
     // b) insert em oportunidades: cliente_id, contato_id, marca_ids [PRADO], descricao = nome da obra, etapa 'negociacao'
     const { data: novaOp, error: opErr } = await supabase
       .from('oportunidades')
@@ -305,7 +321,16 @@ export const cadastrarObraFechada = createServerFn({ method: 'POST' })
       obraId = resObraId as string;
     } catch (rpcFail: any) {
       // d) se a RPC falhar, apagar a oportunidade criada
-      await supabase.from('oportunidades').delete().eq('id', novaOp.id);
+      const { error: delErr } = await supabase
+        .from('oportunidades')
+        .delete()
+        .eq('id', novaOp.id);
+
+      if (delErr) {
+        throw new Error(
+          `Erro ao iniciar gestão da obra: ${rpcFail.message}. Falha no rollback da oportunidade: ${delErr.message}`
+        );
+      }
       throw new Error(rpcFail.message || 'Erro ao iniciar gestão da obra.');
     }
 
