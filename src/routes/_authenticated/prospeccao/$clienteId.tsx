@@ -6,6 +6,7 @@ import {
   obterFichaCliente,
   atualizarCliente,
   adicionarContato,
+  editarContato,
   concluirFollowup,
 } from '@/lib/prospeccao.functions';
 import { formatarData, formatarDataHora, formatarMesAno, statusData } from '@/lib/date-utils';
@@ -19,6 +20,7 @@ import { DialogEnviei } from '@/components/prospeccao/dialog-enviei';
 import { DialogRespondeu } from '@/components/prospeccao/dialog-respondeu';
 import { DialogRemarcar } from '@/components/prospeccao/dialog-remarcar';
 import { DialogMesclarCliente } from '@/components/prospeccao/dialog-mesclar-cliente';
+import { DialogRegistrarAtividade } from '@/components/prospeccao/dialog-registrar-atividade';
 import {
   ArrowLeft,
   Building2,
@@ -39,6 +41,7 @@ import {
   User,
   AlertCircle,
   FileText,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
@@ -75,21 +78,35 @@ function FichaClientePage() {
   const [modalNovoContato, setModalNovoContato] = useState(false);
   const [nomeNovoContato, setNomeNovoContato] = useState('');
   const [cargoNovoContato, setCargoNovoContato] = useState('');
+  const [telNovoContato, setTelNovoContato] = useState('');
   const [waNovoContato, setWaNovoContato] = useState('');
   const [emailNovoContato, setEmailNovoContato] = useState('');
   const [salvandoContato, setSalvandoContato] = useState(false);
+
+  // Estados para edição de contato
+  const [modalEditarContato, setModalEditarContato] = useState(false);
+  const [contatoEditandoId, setContatoEditandoId] = useState('');
+  const [nomeContatoEdit, setNomeContatoEdit] = useState('');
+  const [cargoContatoEdit, setCargoContatoEdit] = useState('');
+  const [telContatoEdit, setTelContatoEdit] = useState('');
+  const [waContatoEdit, setWaContatoEdit] = useState('');
+  const [emailContatoEdit, setEmailContatoEdit] = useState('');
+  const [salvandoEdicaoContato, setSalvandoEdicaoContato] = useState(false);
 
   // Estados de modais de ações
   const [modalEnviei, setModalEnviei] = useState(false);
   const [modalRespondeu, setModalRespondeu] = useState(false);
   const [modalRemarcar, setModalRemarcar] = useState(false);
   const [modalMesclar, setModalMesclar] = useState(false);
+  const [modalAtividade, setModalAtividade] = useState(false);
   const [contatoSelecionado, setContatoSelecionado] = useState<any | null>(null);
+  const [contatoAtividade, setContatoAtividade] = useState<any | null>(null);
 
   // Server functions
   const fetchFicha = useServerFn(obterFichaCliente);
   const salvarCliente = useServerFn(atualizarCliente);
   const criarContato = useServerFn(adicionarContato);
+  const salvarEdicaoContato = useServerFn(editarContato);
   const executarConcluirFollowup = useServerFn(concluirFollowup);
 
   const { data, isLoading, refetch } = useQuery({
@@ -163,6 +180,7 @@ function FichaClientePage() {
           clienteId,
           nome: nomeNovoContato.trim(),
           cargo: cargoNovoContato.trim() || undefined,
+          telefone: telNovoContato.trim() || undefined,
           whatsapp: waNovoContato.trim() || undefined,
           email: emailNovoContato.trim() || undefined,
         },
@@ -172,6 +190,7 @@ function FichaClientePage() {
       setModalNovoContato(false);
       setNomeNovoContato('');
       setCargoNovoContato('');
+      setTelNovoContato('');
       setWaNovoContato('');
       setEmailNovoContato('');
       refetch();
@@ -180,6 +199,51 @@ function FichaClientePage() {
     } finally {
       setSalvandoContato(false);
     }
+  }
+
+  function abrirEditarContato(contato: any) {
+    setContatoEditandoId(contato.id);
+    setNomeContatoEdit(contato.nome || '');
+    setCargoContatoEdit(contato.cargo || '');
+    setTelContatoEdit(contato.telefone || '');
+    setWaContatoEdit(contato.whatsapp || '');
+    setEmailContatoEdit(contato.email || '');
+    setModalEditarContato(true);
+  }
+
+  async function handleSalvarEdicaoContato(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nomeContatoEdit.trim()) {
+      toast.error('Informe o nome do contato.');
+      return;
+    }
+
+    setSalvandoEdicaoContato(true);
+    try {
+      await salvarEdicaoContato({
+        data: {
+          id: contatoEditandoId,
+          nome: nomeContatoEdit.trim(),
+          cargo: cargoContatoEdit.trim() || undefined,
+          telefone: telContatoEdit.trim() || undefined,
+          whatsapp: waContatoEdit.trim() || undefined,
+          email: emailContatoEdit.trim() || undefined,
+        },
+      });
+
+      toast.success('Contato atualizado com sucesso!');
+      setModalEditarContato(false);
+      refetch();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao editar contato.');
+    } finally {
+      setSalvandoEdicaoContato(false);
+    }
+  }
+
+  function abrirAtividade(contato?: any) {
+    setContatoAtividade(contato || null);
+    setModalAtividade(true);
   }
 
   async function handleConcluirFollowup(id: string) {
@@ -236,17 +300,30 @@ function FichaClientePage() {
           </Link>
         </Button>
 
-        {/* Botão Juntar com... */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setModalMesclar(true)}
-          className="gap-1.5 font-semibold text-xs h-9"
-          title="Mesclar construtora duplicada nesta ficha"
-        >
-          <Merge className="h-3.5 w-3.5 text-primary" />
-          Juntar com...
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Botão + Atividade Geral */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => abrirAtividade()}
+            className="gap-1.5 font-semibold text-xs h-9"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            + Atividade
+          </Button>
+
+          {/* Botão Juntar com... */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setModalMesclar(true)}
+            className="gap-1.5 font-semibold text-xs h-9"
+            title="Mesclar construtora duplicada nesta ficha"
+          >
+            <Merge className="h-3.5 w-3.5 text-primary" />
+            Juntar com...
+          </Button>
+        </div>
       </div>
 
       {/* 1. Dados da Construtora com Edição */}
@@ -334,7 +411,8 @@ function FichaClientePage() {
                 >
                   <option value="nao_verificado">Não verificado</option>
                   <option value="livre">Livre</option>
-                  <option value="atendida_outro_rep">Atendida por outro representante</option>
+                  <option value="ja_cliente">Já é cliente</option>
+                  <option value="atendida_outro_rep">Atendido por outro representante</option>
                 </select>
               </div>
 
@@ -480,6 +558,16 @@ function FichaClientePage() {
 
               <Button
                 size="sm"
+                variant="outline"
+                onClick={() => abrirAtividade()}
+                className="h-10 px-3 text-xs font-semibold gap-1.5"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                + Atividade
+              </Button>
+
+              <Button
+                size="sm"
                 variant="ghost"
                 onClick={() => setModalRemarcar(true)}
                 className="h-10 px-3 text-xs font-semibold"
@@ -547,6 +635,9 @@ function FichaClientePage() {
             <div className="space-y-3">
               {contatos.map((contato: any) => {
                 const numeroWaLimpo = (contato.whatsapp || '').replace(/\D/g, '');
+                const numeroTelLimpo = (contato.telefone || '').replace(/\D/g, '');
+                const telParaLigar = numeroTelLimpo || numeroWaLimpo;
+
                 return (
                   <div
                     key={contato.id}
@@ -558,6 +649,14 @@ function FichaClientePage() {
                         {contato.cargo && (
                           <p className="text-xs text-muted-foreground">{contato.cargo}</p>
                         )}
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mt-1">
+                          {contato.telefone && (
+                            <span>Fixo: {contato.telefone}</span>
+                          )}
+                          {contato.whatsapp && (
+                            <span>WA: {contato.whatsapp}</span>
+                          )}
+                        </div>
                       </div>
                       {contato.tentativas_sem_resposta > 0 && (
                         <span className="text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
@@ -566,30 +665,33 @@ function FichaClientePage() {
                       )}
                     </div>
 
-                    {/* Botões de Ação Direta: WhatsApp, Ligar, E-mail */}
-                    <div className="flex flex-wrap gap-2 pt-1 border-t border-border/60">
+                    {/* Botões de Ação Direta: WhatsApp, Ligar, E-mail, + Atividade, Editar */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/60">
                       {numeroWaLimpo ? (
-                        <>
-                          <a
-                            href={`https://wa.me/${numeroWaLimpo}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 text-xs font-semibold transition-colors"
-                          >
-                            <MessageCircle className="h-3.5 w-3.5" />
-                            WhatsApp
-                          </a>
-                          <a
-                            href={`tel:${numeroWaLimpo}`}
-                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-blue-600/10 hover:bg-blue-600/20 text-blue-700 dark:text-blue-400 text-xs font-semibold transition-colors"
-                          >
-                            <Phone className="h-3.5 w-3.5" />
-                            Ligar
-                          </a>
-                        </>
+                        <a
+                          href={`https://wa.me/${numeroWaLimpo}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 text-xs font-semibold transition-colors"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          WhatsApp
+                        </a>
                       ) : (
-                        <span className="text-xs text-muted-foreground italic">Sem telefone</span>
+                        <span className="inline-flex items-center text-[10px] font-medium bg-muted text-muted-foreground px-2 py-1 rounded border border-border">
+                          Sem WhatsApp
+                        </span>
                       )}
+
+                      {telParaLigar ? (
+                        <a
+                          href={`tel:${telParaLigar}`}
+                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-blue-600/10 hover:bg-blue-600/20 text-blue-700 dark:text-blue-400 text-xs font-semibold transition-colors"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          Ligar
+                        </a>
+                      ) : null}
 
                       {contato.email && (
                         <a
@@ -600,6 +702,28 @@ function FichaClientePage() {
                           E-mail
                         </a>
                       )}
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => abrirAtividade(contato)}
+                        className="h-8 px-2.5 text-xs font-semibold gap-1 text-primary hover:text-primary"
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        + Atividade
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => abrirEditarContato(contato)}
+                        className="h-8 px-2 text-xs font-medium text-muted-foreground hover:text-foreground gap-1"
+                      >
+                        <Edit2 className="h-3 w-3" />
+                        Editar
+                      </Button>
                     </div>
                   </div>
                 );
@@ -710,7 +834,7 @@ function FichaClientePage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center justify-between gap-1">
                       <span className="text-xs font-bold uppercase text-foreground">
-                        {reg.tipo} {reg.direcao !== 'nenhuma' && `• ${reg.direcao}`}
+                        {reg.tipo === 'outro' ? 'Atividade' : reg.tipo} {reg.direcao !== 'nenhuma' && `• ${reg.direcao}`}
                         {reg.contatos?.nome && ` (${reg.contatos.nome})`}
                       </span>
                       <span className="text-[11px] text-muted-foreground tabular-nums">
@@ -773,6 +897,18 @@ function FichaClientePage() {
 
               <div>
                 <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                  Telefone (fixo)
+                </label>
+                <Input
+                  value={telNovoContato}
+                  onChange={(e) => setTelNovoContato(e.target.value)}
+                  placeholder="Ex: 1133334444"
+                  className="h-10 bg-background"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground block mb-1">
                   WhatsApp
                 </label>
                 <Input
@@ -814,7 +950,113 @@ function FichaClientePage() {
         </div>
       )}
 
+      {/* Modal Editar Contato */}
+      {modalEditarContato && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-card border border-border p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Editar Contato</h3>
+              <button
+                onClick={() => setModalEditarContato(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvarEdicaoContato} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                  Nome *
+                </label>
+                <Input
+                  value={nomeContatoEdit}
+                  onChange={(e) => setNomeContatoEdit(e.target.value)}
+                  placeholder="Nome completo do contato"
+                  required
+                  className="h-10 bg-background"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                  Cargo
+                </label>
+                <Input
+                  value={cargoContatoEdit}
+                  onChange={(e) => setCargoContatoEdit(e.target.value)}
+                  placeholder="Ex: Gerente de Compras"
+                  className="h-10 bg-background"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                  Telefone (fixo)
+                </label>
+                <Input
+                  value={telContatoEdit}
+                  onChange={(e) => setTelContatoEdit(e.target.value)}
+                  placeholder="Ex: 1133334444"
+                  className="h-10 bg-background"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                  WhatsApp
+                </label>
+                <Input
+                  value={waContatoEdit}
+                  onChange={(e) => setWaContatoEdit(e.target.value)}
+                  placeholder="Ex: 11999998888"
+                  className="h-10 bg-background"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                  E-mail
+                </label>
+                <Input
+                  type="email"
+                  value={emailContatoEdit}
+                  onChange={(e) => setEmailContatoEdit(e.target.value)}
+                  placeholder="nome@construtora.com.br"
+                  className="h-10 bg-background"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setModalEditarContato(false)}
+                  disabled={salvandoEdicaoContato}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={salvandoEdicaoContato}>
+                  {salvandoEdicaoContato ? 'Salvando...' : 'Salvar Alterações'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Modais de Ações */}
+      <DialogRegistrarAtividade
+        open={modalAtividade}
+        onOpenChange={setModalAtividade}
+        clienteId={clienteId}
+        clienteNome={cliente.nome}
+        contatoId={contatoAtividade?.id}
+        contatos={contatos}
+        oportunidades={oportunidades}
+        atalhosDias={atalhosDias}
+        onSuccess={() => refetch()}
+      />
       <DialogEnviei
         open={modalEnviei}
         onOpenChange={setModalEnviei}

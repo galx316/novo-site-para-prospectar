@@ -126,6 +126,7 @@ export type Database = {
           created_at: string
           id: string
           nome: string
+          nome_chave: string | null
           nome_normalizado: string
           observacoes: string | null
           representante_prado: string | null
@@ -139,6 +140,7 @@ export type Database = {
           created_at?: string
           id?: string
           nome: string
+          nome_chave?: string | null
           nome_normalizado: string
           observacoes?: string | null
           representante_prado?: string | null
@@ -152,6 +154,7 @@ export type Database = {
           created_at?: string
           id?: string
           nome?: string
+          nome_chave?: string | null
           nome_normalizado?: string
           observacoes?: string | null
           representante_prado?: string | null
@@ -227,6 +230,7 @@ export type Database = {
           id: string
           nome: string
           observacoes: string | null
+          telefone: string | null
           tentativas_sem_resposta: number
           updated_at: string
           whatsapp: string | null
@@ -239,6 +243,7 @@ export type Database = {
           id?: string
           nome: string
           observacoes?: string | null
+          telefone?: string | null
           tentativas_sem_resposta?: number
           updated_at?: string
           whatsapp?: string | null
@@ -251,6 +256,7 @@ export type Database = {
           id?: string
           nome?: string
           observacoes?: string | null
+          telefone?: string | null
           tentativas_sem_resposta?: number
           updated_at?: string
           whatsapp?: string | null
@@ -723,6 +729,19 @@ export type Database = {
         Returns: undefined
       }
       normalizar_texto: { Args: { t: string }; Returns: string }
+      obter_ou_criar_marca: { Args: { p_nome: string }; Returns: string }
+      registrar_atividade: {
+        Args: {
+          p_cliente_id?: string | null
+          p_contato_id?: string | null
+          p_data_proxima?: string | null
+          p_motivo?: string | null
+          p_oportunidade_id?: string | null
+          p_texto: string
+          p_tipo: Database["public"]["Enums"]["tipo_registro"]
+        }
+        Returns: undefined
+      }
       registrar_envio: {
         Args: {
           p_canal: Database["public"]["Enums"]["tipo_registro"]
@@ -766,7 +785,7 @@ export type Database = {
         | "perdido"
       linha_marca: "esquadrias" | "kit_porta" | "outra"
       origem_followup: "prospeccao" | "obra" | "automatico" | "manual"
-      situacao_prado: "nao_verificado" | "livre" | "atendida_outro_rep"
+      situacao_prado: "nao_verificado" | "livre" | "ja_cliente" | "atendida_outro_rep"
       status_followup: "pendente" | "concluido" | "cancelado"
       status_lote:
         | "aguardando_cadastro"
@@ -794,6 +813,7 @@ export type Database = {
         | "email"
         | "visita"
         | "problema"
+        | "outro"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -933,7 +953,12 @@ export const Constants = {
       ],
       linha_marca: ["esquadrias", "kit_porta", "outra"],
       origem_followup: ["prospeccao", "obra", "automatico", "manual"],
-      situacao_prado: ["nao_verificado", "livre", "atendida_outro_rep"],
+      situacao_prado: [
+        "nao_verificado",
+        "livre",
+        "ja_cliente",
+        "atendida_outro_rep",
+      ],
       status_followup: ["pendente", "concluido", "cancelado"],
       status_lote: [
         "aguardando_cadastro",
@@ -963,6 +988,7 @@ export const Constants = {
         "email",
         "visita",
         "problema",
+        "outro",
       ],
     },
   },

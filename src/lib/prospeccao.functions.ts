@@ -21,6 +21,7 @@ export const listarProspects = createServerFn({ method: 'GET' })
     texto?: string | undefined;
     marcaId?: string | undefined;
     etapa?: string | undefined;
+    situacao?: SituacaoPrado | undefined;
     apenasOutroRep?: boolean | undefined;
     apenasSemProximoPasso?: boolean | undefined;
   } | undefined) => data)
@@ -30,9 +31,9 @@ export const listarProspects = createServerFn({ method: 'GET' })
 
     const texto = data?.texto?.trim() || '';
 
-    // 1. Buscar marcas ativas e configurações
+    // 1. Buscar todas as marcas (para enriquecer histórico) e configurações
     const [marcasRes, configRes] = await Promise.all([
-      supabase.from('marcas').select('*').eq('ativa', true).order('nome'),
+      supabase.from('marcas').select('*').order('nome'),
       supabase.from('configuracoes').select('*').eq('id', 1).single(),
     ]);
 
@@ -63,7 +64,9 @@ export const listarProspects = createServerFn({ method: 'GET' })
       }
     } else {
       let query = supabase.from('clientes').select('*').order('updated_at', { ascending: false }).limit(200);
-      if (data?.apenasOutroRep) {
+      if (data?.situacao) {
+        query = query.eq('situacao_prado', data.situacao);
+      } else if (data?.apenasOutroRep) {
         query = query.eq('situacao_prado', 'atendida_outro_rep');
       }
       const { data: todosClientes, error: errTodos } = await query;
@@ -166,7 +169,9 @@ export const listarProspects = createServerFn({ method: 'GET' })
       prospects = prospects.filter((p: any) => p.oportunidades.some((op: any) => op.etapa === data.etapa));
     }
 
-    if (data?.apenasOutroRep) {
+    if (data?.situacao) {
+      prospects = prospects.filter((p: any) => p.situacao_prado === data.situacao);
+    } else if (data?.apenasOutroRep) {
       prospects = prospects.filter((p: any) => p.situacao_prado === 'atendida_outro_rep');
     }
 
@@ -211,7 +216,7 @@ export const obterFichaCliente = createServerFn({ method: 'GET' })
           .eq('cliente_id', clienteId)
           .order('data', { ascending: false })
           .order('created_at', { ascending: false }),
-        supabase.from('marcas').select('*').eq('ativa', true).order('nome'),
+        supabase.from('marcas').select('*').order('nome'),
         supabase.from('configuracoes').select('*').eq('id', 1).single(),
       ]);
 
@@ -271,6 +276,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
     uf?: string | undefined;
     nomeContato: string;
     cargo?: string | undefined;
+    telefone?: string | undefined;
     whatsapp?: string | undefined;
     email?: string | undefined;
     marcaIds: string[];
@@ -389,6 +395,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
           cliente_id: clienteId,
           nome: data.nomeContato.trim(),
           cargo: data.cargo?.trim() || null,
+          telefone: data.telefone?.trim() || null,
           whatsapp: data.whatsapp?.trim() || null,
           email: data.email?.trim() || null,
         })
@@ -681,6 +688,7 @@ export const adicionarContato = createServerFn({ method: 'POST' })
     clienteId: string;
     nome: string;
     cargo?: string | undefined;
+    telefone?: string | undefined;
     whatsapp?: string | undefined;
     email?: string | undefined;
     observacoes?: string | undefined;
@@ -695,6 +703,7 @@ export const adicionarContato = createServerFn({ method: 'POST' })
         cliente_id: data.clienteId,
         nome: data.nome.trim(),
         cargo: data.cargo?.trim() || null,
+        telefone: data.telefone?.trim() || null,
         whatsapp: data.whatsapp?.trim() || null,
         email: data.email?.trim() || null,
         observacoes: data.observacoes?.trim() || null,
@@ -710,4 +719,109 @@ export const adicionarContato = createServerFn({ method: 'POST' })
     }
 
     return { success: true, contato };
+  });
+
+/**
+ * Edição de contato existente
+ */
+export const editarContato = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    id: string;
+    nome: string;
+    cargo?: string | undefined;
+    telefone?: string | undefined;
+    whatsapp?: string | undefined;
+    email?: string | undefined;
+    observacoes?: string | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.nome?.trim()) throw new Error('Informe o nome do contato.');
+
+    const { data: contato, error } = await supabase
+      .from('contatos')
+      .update({
+        nome: data.nome.trim(),
+        cargo: data.cargo?.trim() || null,
+        telefone: data.telefone?.trim() || null,
+        whatsapp: data.whatsapp?.trim() || null,
+        email: data.email?.trim() || null,
+        observacoes: data.observacoes?.trim() || null,
+      })
+      .eq('id', data.id)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        throw new Error('Este WhatsApp ou e-mail já pertence a outro contato cadastrado.');
+      }
+      throw new Error(error.message);
+    }
+
+    return { success: true, contato };
+  });
+
+/**
+ * RPC obter_ou_criar_marca
+ */
+export const obterOuCriarMarca = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: { nome: string }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    const nome = data.nome?.trim();
+    if (!nome) throw new Error('Informe o nome da marca.');
+
+    const { data: id, error } = await supabase.rpc('obter_ou_criar_marca', {
+      p_nome: nome,
+    });
+    if (error) throw new Error(error.message);
+
+    const { data: marca, error: errMarca } = await supabase
+      .from('marcas')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (errMarca) throw new Error(errMarca.message);
+
+    return { id, marca };
+  });
+
+/**
+ * RPC registrar_atividade
+ */
+export const registrarAtividade = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    tipo: TipoRegistro;
+    texto: string;
+    clienteId?: string | undefined;
+    contatoId?: string | undefined;
+    oportunidadeId?: string | undefined;
+    dataProxima?: string | undefined;
+    motivo?: string | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.texto?.trim()) throw new Error('Descreva a atividade.');
+
+    const { error } = await supabase.rpc('registrar_atividade', {
+      p_tipo: data.tipo,
+      p_texto: data.texto.trim(),
+      ...(data.clienteId ? { p_cliente_id: data.clienteId } : {}),
+      ...(data.contatoId ? { p_contato_id: data.contatoId } : {}),
+      ...(data.oportunidadeId ? { p_oportunidade_id: data.oportunidadeId } : {}),
+      ...(data.dataProxima ? { p_data_proxima: data.dataProxima } : {}),
+      ...(data.motivo?.trim() ? { p_motivo: data.motivo.trim() } : {}),
+    });
+    if (error) throw new Error(error.message);
+    return { success: true };
   });

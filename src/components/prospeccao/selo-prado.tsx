@@ -1,4 +1,4 @@
-import { AlertCircle, HelpCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, HelpCircle, CheckCircle2, UserCheck } from 'lucide-react';
 import type { Database } from '@/integrations/supabase/types';
 
 type SituacaoPrado = Database['public']['Enums']['situacao_prado'];
@@ -10,6 +10,17 @@ interface SeloPradoProps {
 }
 
 export function SeloPrado({ situacao, representante, className = '' }: SeloPradoProps) {
+  if (situacao === 'ja_cliente') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-md bg-blue-500/15 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-400 border border-blue-500/25 shadow-xs ${className}`}
+      >
+        <UserCheck className="h-3.5 w-3.5 shrink-0" />
+        Já é cliente
+      </span>
+    );
+  }
+
   if (situacao === 'atendida_outro_rep') {
     return (
       <span

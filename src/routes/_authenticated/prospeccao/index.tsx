@@ -35,6 +35,7 @@ import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
 
 type EtapaComercial = Database['public']['Enums']['etapa_comercial'];
+type SituacaoPrado = Database['public']['Enums']['situacao_prado'];
 
 export const Route = createFileRoute('/_authenticated/prospeccao/')({
   head: () => ({
@@ -54,7 +55,7 @@ function ProspeccaoPage() {
   const buscaDiferida = useDeferredValue(busca);
   const [marcaFiltro, setMarcaFiltro] = useState<string>('todas');
   const [etapaFiltro, setEtapaFiltro] = useState<string>('todas');
-  const [apenasOutroRep, setApenasOutroRep] = useState(false);
+  const [situacaoFiltro, setSituacaoFiltro] = useState<SituacaoPrado | 'todas'>('todas');
   const [apenasSemProximoPasso, setApenasSemProximoPasso] = useState(false);
 
   // Estados de modais
@@ -76,7 +77,7 @@ function ProspeccaoPage() {
       buscaDiferida,
       marcaFiltro,
       etapaFiltro,
-      apenasOutroRep,
+      situacaoFiltro,
       apenasSemProximoPasso,
     ],
     queryFn: () =>
@@ -85,7 +86,7 @@ function ProspeccaoPage() {
           texto: buscaDiferida.trim() || undefined,
           marcaId: marcaFiltro !== 'todas' ? marcaFiltro : undefined,
           etapa: etapaFiltro !== 'todas' ? etapaFiltro : undefined,
-          apenasOutroRep,
+          situacao: situacaoFiltro !== 'todas' ? situacaoFiltro : undefined,
           apenasSemProximoPasso,
         },
       }),
@@ -125,14 +126,14 @@ function ProspeccaoPage() {
     busca.trim() !== '' ||
     marcaFiltro !== 'todas' ||
     etapaFiltro !== 'todas' ||
-    apenasOutroRep ||
+    situacaoFiltro !== 'todas' ||
     apenasSemProximoPasso;
 
   function limparFiltros() {
     setBusca('');
     setMarcaFiltro('todas');
     setEtapaFiltro('todas');
-    setApenasOutroRep(false);
+    setSituacaoFiltro('todas');
     setApenasSemProximoPasso(false);
   }
 
@@ -222,9 +223,9 @@ function ProspeccaoPage() {
               className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-medium focus:ring-2 focus:ring-primary"
             >
               <option value="todas">Todas as marcas</option>
-              {marcas.map((m: any) => (
+              {marcas.filter((m: any) => m.ativa !== false).map((m: any) => (
                 <option key={m.id} value={m.id}>
-                  {m.nome} ({m.linha})
+                  {m.nome} {m.linha ? `(${m.linha})` : ''}
                 </option>
               ))}
             </select>
@@ -249,20 +250,22 @@ function ProspeccaoPage() {
             </select>
           </div>
 
-          {/* Toggle: Atendidas por outro representante */}
-          <div className="flex items-end">
-            <button
-              type="button"
-              onClick={() => setApenasOutroRep(!apenasOutroRep)}
-              className={`w-full h-10 px-3 rounded-lg border text-xs font-medium flex items-center justify-center gap-2 transition-all ${
-                apenasOutroRep
-                  ? 'border-destructive bg-destructive/15 text-destructive font-semibold ring-1 ring-destructive'
-                  : 'border-input bg-background text-foreground hover:bg-accent'
-              }`}
+          {/* Filtro Situação do Cliente */}
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+              Situação do cliente
+            </label>
+            <select
+              value={situacaoFiltro}
+              onChange={(e) => setSituacaoFiltro(e.target.value as SituacaoPrado | 'todas')}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-medium focus:ring-2 focus:ring-primary"
             >
-              <AlertTriangle className="h-3.5 w-3.5" />
-              Atendidas por outro rep.
-            </button>
+              <option value="todas">Todas as situações</option>
+              <option value="nao_verificado">Não verificado</option>
+              <option value="livre">Livre</option>
+              <option value="ja_cliente">Já é cliente</option>
+              <option value="atendida_outro_rep">Atendido por outro rep.</option>
+            </select>
           </div>
 
           {/* Toggle: Sem próximo passo */}

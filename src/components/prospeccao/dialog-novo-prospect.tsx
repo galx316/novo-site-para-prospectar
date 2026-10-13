@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useServerFn } from '@tanstack/react-start';
-import { buscarClientesRPC, criarProspect } from '@/lib/prospeccao.functions';
+import { buscarClientesRPC, criarProspect, obterOuCriarMarca } from '@/lib/prospeccao.functions';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Search,
   Sparkles,
+  Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { SeloPrado } from './selo-prado';
@@ -37,8 +38,9 @@ type TipoRegistro = Database['public']['Enums']['tipo_registro'];
 interface Marca {
   id: string;
   nome: string;
-  linha: string;
-  cor: string | null;
+  linha?: string;
+  cor?: string | null;
+  ativa?: boolean;
 }
 
 interface DialogNovoProspectProps {
@@ -56,15 +58,25 @@ export function DialogNovoProspect({
 }: DialogNovoProspectProps) {
   const navigate = useNavigate();
 
-  // Estados dos campos
+  // Estados dos campos da construtora
   const [nomeConstrutora, setNomeConstrutora] = useState('');
   const [cidade, setCidade] = useState('');
   const [uf, setUf] = useState('');
+  const [situacaoPrado, setSituacaoPrado] = useState<SituacaoPrado>('nao_verificado');
+  const [representantePrado, setRepresentantePrado] = useState('');
+
+  // Estados do contato
   const [nomeContato, setNomeContato] = useState('');
   const [cargoContato, setCargoContato] = useState('');
+  const [telefone, setTelefone] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [email, setEmail] = useState('');
+
+  // Estados das marcas
+  const [marcasLocais, setMarcasLocais] = useState<Marca[]>([]);
   const [marcasSelecionadas, setMarcasSelecionadas] = useState<string[]>([]);
+  const [novaMarcaNome, setNovaMarcaNome] = useState('');
+  const [adicionandoMarca, setAdicionandoMarca] = useState(false);
   const [descricao, setDescricao] = useState('');
 
   // Construtora existente selecionada (opcional)
@@ -78,6 +90,7 @@ export function DialogNovoProspect({
   // Sugestões de buscar_clientes
   const [sugestoes, setSugestoes] = useState<any[]>([]);
   const [buscandoSugestoes, setBuscandoSugestoes] = useState(false);
+  const [ignorarParecidas, setIgnorarParecidas] = useState(false);
 
   // Avisos de Prado / Confirmação
   const [confirmouPradoOutroRep, setConfirmouPradoOutroRep] = useState(false);
@@ -98,6 +111,7 @@ export function DialogNovoProspect({
 
   const buscarClientes = useServerFn(buscarClientesRPC);
   const submeterCriacao = useServerFn(criarProspect);
+  const criarMarcaFn = useServerFn(obterOuCriarMarca);
 
   const buscaTimeoutRef = useRef<any>(null);
 
@@ -107,16 +121,25 @@ export function DialogNovoProspect({
       setNomeConstrutora('');
       setCidade('');
       setUf('');
+      setSituacaoPrado('nao_verificado');
+      setRepresentantePrado('');
       setNomeContato('');
       setCargoContato('');
+      setTelefone('');
       setWhatsapp('');
       setEmail('');
-      // Selecionar PRADO por padrão se existir
-      const prado = marcasDisponiveis.find((m) => m.nome === 'PRADO');
-      setMarcasSelecionadas(prado ? [prado.id] : marcasDisponiveis.slice(0, 1).map((m) => m.id));
+
+      // Marcas ativas como opções de escolha
+      const ativas = (marcasDisponiveis || []).filter((m: any) => m.ativa !== false);
+      setMarcasLocais(ativas);
+      const prado = ativas.find((m) => m.nome === 'PRADO');
+      setMarcasSelecionadas(prado ? [prado.id] : ativas.slice(0, 1).map((m) => m.id));
+
+      setNovaMarcaNome('');
       setDescricao('');
       setClienteSelecionado(null);
       setSugestoes([]);
+      setIgnorarParecidas(false);
       setConfirmouPradoOutroRep(false);
       setJaEnviouApresentacao(false);
       setCanalEnvio('whatsapp');
@@ -129,6 +152,7 @@ export function DialogNovoProspect({
     setNomeConstrutora(val);
     setClienteSelecionado(null);
     setErroDuplicado(null);
+    setIgnorarParecidas(false);
 
     if (buscaTimeoutRef.current) {
       clearTimeout(buscaTimeoutRef.current);
@@ -170,11 +194,34 @@ export function DialogNovoProspect({
     );
   }
 
+  async function handleAdicionarMarcaPersonalizada() {
+    const nome = novaMarcaNome.trim();
+    if (!nome) return;
+    setAdicionandoMarca(true);
+    try {
+      const resp = await criarMarcaFn({ data: { nome } });
+      if (resp?.marca) {
+        setMarcasLocais((prev) => {
+          if (prev.some((m) => m.id === resp.marca.id)) return prev;
+          return [...prev, resp.marca];
+        });
+      }
+      setMarcasSelecionadas((prev) => (prev.includes(resp.id) ? prev : [...prev, resp.id]));
+      setNovaMarcaNome('');
+      toast.success(`Marca "${resp?.marca?.nome || nome}" adicionada e selecionada!`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao adicionar marca personalizada.');
+    } finally {
+      setAdicionandoMarca(false);
+    }
+  }
+
   // Verifica se PRADO está marcado e se a construtora é atendida por outro representante
-  const pradoId = marcasDisponiveis.find((m) => m.nome === 'PRADO')?.id;
+  const pradoId = marcasLocais.find((m) => m.nome === 'PRADO')?.id;
   const pradoMarcado = pradoId ? marcasSelecionadas.includes(pradoId) : false;
   const construtoraAtendidaOutroRep =
-    clienteSelecionado?.situacao_prado === 'atendida_outro_rep';
+    clienteSelecionado?.situacao_prado === 'atendida_outro_rep' ||
+    (!clienteSelecionado && situacaoPrado === 'atendida_outro_rep');
   const alertaPradoAtivo = pradoMarcado && construtoraAtendidaOutroRep;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -208,8 +255,14 @@ export function DialogNovoProspect({
           nomeCliente: nomeConstrutora.trim(),
           cidade: cidade.trim() || undefined,
           uf: uf.trim() || undefined,
+          situacaoPrado: !clienteSelecionado ? situacaoPrado : undefined,
+          representantePrado:
+            !clienteSelecionado && situacaoPrado === 'atendida_outro_rep'
+              ? representantePrado.trim()
+              : undefined,
           nomeContato: nomeContato.trim(),
           cargo: cargoContato.trim() || undefined,
+          telefone: telefone.trim() || undefined,
           whatsapp: whatsapp.trim() || undefined,
           email: email.trim() || undefined,
           marcaIds: marcasSelecionadas,
@@ -293,7 +346,7 @@ export function DialogNovoProspect({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="mt-3 gap-1.5 h-9 bg-card"
+                    className="mt-3 gap-1.5 h-9 bg-card font-semibold"
                     onClick={() => {
                       onOpenChange(false);
                       navigate({
@@ -345,13 +398,13 @@ export function DialogNovoProspect({
                 </div>
               )}
 
-              {/* Sugestões de busca encontradas */}
-              {sugestoes.length > 0 && !clienteSelecionado && (
+              {/* Sugestões de busca encontradas (até 5 parecidas com selo de situação) */}
+              {sugestoes.length > 0 && !clienteSelecionado && !ignorarParecidas && (
                 <div className="mt-2 rounded-lg border border-border bg-card shadow-md p-2 space-y-1 animate-in fade-in">
                   <p className="text-[11px] font-semibold text-muted-foreground px-2 py-1">
                     Construtoras parecidas já cadastradas:
                   </p>
-                  {sugestoes.map((sug) => (
+                  {sugestoes.slice(0, 5).map((sug) => (
                     <div
                       key={sug.id}
                       className="flex items-center justify-between p-2 rounded-md hover:bg-accent/70 transition-colors"
@@ -375,29 +428,78 @@ export function DialogNovoProspect({
                       </Button>
                     </div>
                   ))}
+
+                  <div className="pt-1.5 border-t border-border mt-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setIgnorarParecidas(true);
+                        setSugestoes([]);
+                      }}
+                      className="w-full text-xs text-muted-foreground hover:text-foreground h-8 font-medium"
+                    >
+                      É outra empresa, criar nova
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Cidade e UF (visíveis se criando nova) */}
+            {/* Cidade, UF e Situação (visíveis se criando nova) */}
             {!clienteSelecionado && (
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2">
-                  <Input
-                    placeholder="Cidade (opcional)"
-                    value={cidade}
-                    onChange={(e) => setCidade(e.target.value)}
-                    className="h-10 bg-card text-sm"
-                  />
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <Input
+                      placeholder="Cidade (opcional)"
+                      value={cidade}
+                      onChange={(e) => setCidade(e.target.value)}
+                      className="h-10 bg-card text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Input
+                      placeholder="UF (ex: SP)"
+                      maxLength={2}
+                      value={uf}
+                      onChange={(e) => setUf(e.target.value.toUpperCase())}
+                      className="h-10 bg-card text-sm"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Input
-                    placeholder="UF (ex: SP)"
-                    maxLength={2}
-                    value={uf}
-                    onChange={(e) => setUf(e.target.value.toUpperCase())}
-                    className="h-10 bg-card text-sm"
-                  />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                      Situação do cliente
+                    </label>
+                    <select
+                      value={situacaoPrado}
+                      onChange={(e) => setSituacaoPrado(e.target.value as SituacaoPrado)}
+                      className="w-full h-10 px-3 rounded-lg border border-input bg-card text-xs font-medium"
+                    >
+                      <option value="nao_verificado">Não verificado</option>
+                      <option value="livre">Livre</option>
+                      <option value="ja_cliente">Já é cliente</option>
+                      <option value="atendida_outro_rep">Atendido por outro representante</option>
+                    </select>
+                  </div>
+
+                  {situacaoPrado === 'atendida_outro_rep' && (
+                    <div>
+                      <label className="text-xs font-semibold text-destructive block mb-1">
+                        Nome do representante
+                      </label>
+                      <Input
+                        placeholder="Ex: Carlos Silva"
+                        value={representantePrado}
+                        onChange={(e) => setRepresentantePrado(e.target.value)}
+                        className="h-10 bg-card text-xs"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -429,23 +531,31 @@ export function DialogNovoProspect({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <Input
+                  placeholder="Telefone (fixo) - opcional"
+                  value={telefone}
+                  onChange={(e) => setTelefone(e.target.value)}
+                  className="h-11 bg-card text-sm"
+                />
+              </div>
               <div className="relative">
                 <Input
-                  placeholder="WhatsApp (ex: 11999998888)"
+                  placeholder="WhatsApp - opcional"
                   value={whatsapp}
                   onChange={(e) => setWhatsapp(e.target.value)}
-                  className="h-11 pl-9 bg-card"
+                  className="h-11 pl-9 bg-card text-sm"
                 />
                 <Phone className="h-4 w-4 text-muted-foreground absolute left-3 top-3.5" />
               </div>
               <div className="relative">
                 <Input
                   type="email"
-                  placeholder="E-mail (opcional)"
+                  placeholder="E-mail - opcional"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-11 pl-9 bg-card"
+                  className="h-11 pl-9 bg-card text-sm"
                 />
                 <Mail className="h-4 w-4 text-muted-foreground absolute left-3 top-3.5" />
               </div>
@@ -458,7 +568,7 @@ export function DialogNovoProspect({
               Marcas de interesse *
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {marcasDisponiveis.map((m) => {
+              {marcasLocais.map((m) => {
                 const checked = marcasSelecionadas.includes(m.id);
                 return (
                   <button
@@ -478,10 +588,43 @@ export function DialogNovoProspect({
                     >
                       {checked && <Check className="h-3 w-3 stroke-[3]" />}
                     </div>
-                    <span>{m.nome}</span>
+                    <span className="truncate">{m.nome}</span>
                   </button>
                 );
               })}
+            </div>
+
+            {/* Opção Marca Personalizada */}
+            <div className="pt-2 border-t border-border/60">
+              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+                Personalizada:
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Nome da marca personalizada"
+                  value={novaMarcaNome}
+                  onChange={(e) => setNovaMarcaNome(e.target.value)}
+                  className="h-9 bg-card text-xs flex-1"
+                  disabled={adicionandoMarca}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAdicionarMarcaPersonalizada();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAdicionarMarcaPersonalizada}
+                  disabled={!novaMarcaNome.trim() || adicionandoMarca}
+                  className="h-9 text-xs font-semibold gap-1"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {adicionandoMarca ? 'Adicionando...' : 'Adicionar'}
+                </Button>
+              </div>
             </div>
 
             {/* Aviso Regra de Negócio: PRADO atendida por outro representante */}
@@ -491,7 +634,7 @@ export function DialogNovoProspect({
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                   <div>
                     <strong>Atenção:</strong> Esta construtora já é atendida por outro representante PRADO (
-                    {clienteSelecionado?.representante_prado || 'outro representante'}).
+                    {clienteSelecionado?.representante_prado || representantePrado || 'outro representante'}).
                     <p className="mt-1 text-muted-foreground">
                       Sugerimos ofertar as marcas <strong>Scalla</strong> (esquadrias) ou <strong>Kit Porta (Rohden/Imab)</strong>.
                     </p>
