@@ -825,3 +825,175 @@ export const registrarAtividade = createServerFn({ method: 'POST' })
     if (error) throw new Error(error.message);
     return { success: true };
   });
+
+/**
+ * Edição de oportunidade existente na ficha da construtora
+ */
+export const editarOportunidade = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    clienteId: string;
+    oportunidadeId: string;
+    marcaIds: string[];
+    descricao?: string | null | undefined;
+    contatoId?: string | null | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.clienteId) throw new Error('ID da construtora não informado.');
+    if (!data.oportunidadeId) throw new Error('ID da oportunidade não informado.');
+    if (!data.marcaIds || data.marcaIds.length === 0) {
+      throw new Error('Selecione pelo menos uma marca.');
+    }
+
+    // 1. Checa se a oportunidade pertence ao cliente informado
+    const { data: opExistente, error: opErr } = await supabase
+      .from('oportunidades')
+      .select('*')
+      .eq('id', data.oportunidadeId)
+      .single();
+
+    if (opErr || !opExistente) throw new Error('Oportunidade não encontrada.');
+    if (opExistente.cliente_id !== data.clienteId) {
+      throw new Error('A oportunidade não pertence a esta construtora.');
+    }
+
+    // 2. Se contato informado, checa se pertence a esse cliente
+    if (data.contatoId) {
+      const { data: contatoExistente, error: contErr } = await supabase
+        .from('contatos')
+        .select('id, cliente_id')
+        .eq('id', data.contatoId)
+        .single();
+
+      if (contErr || !contatoExistente) throw new Error('Contato não encontrado.');
+      if (contatoExistente.cliente_id !== data.clienteId) {
+        throw new Error('O contato selecionado não pertence a esta construtora.');
+      }
+    }
+
+    // 3. Atualizar oportunidade
+    const { data: opAtualizada, error: updErr } = await supabase
+      .from('oportunidades')
+      .update({
+        marca_ids: data.marcaIds,
+        descricao: data.descricao?.trim() || null,
+        contato_id: data.contatoId || null,
+      })
+      .eq('id', data.oportunidadeId)
+      .select()
+      .single();
+
+    if (updErr) throw new Error(updErr.message);
+
+    // 4. Se as marcas mudaram, gravar registro tipo 'nota' no histórico:
+    // "Marcas alteradas: <antes> → <depois>"
+    const antesIds = [...(opExistente.marca_ids || [])].sort();
+    const depoisIds = [...data.marcaIds].sort();
+    const marcasMudaram = JSON.stringify(antesIds) !== JSON.stringify(depoisIds);
+
+    if (marcasMudaram) {
+      const todosIds = Array.from(new Set([...antesIds, ...depoisIds]));
+      const { data: marcasData } = await supabase
+        .from('marcas')
+        .select('id, nome')
+        .in('id', todosIds);
+
+      const marcasMap = new Map((marcasData || []).map((m: any) => [m.id, m.nome]));
+      const nomesAntes = (opExistente.marca_ids || []).map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
+      const nomesDepois = data.marcaIds.map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
+
+      await supabase.from('registros').insert({
+        cliente_id: data.clienteId,
+        oportunidade_id: data.oportunidadeId,
+        contato_id: data.contatoId || null,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: `Marcas alteradas: ${nomesAntes} → ${nomesDepois}`,
+      });
+    }
+
+    return { success: true, oportunidade: opAtualizada };
+  });
+
+/**
+ * Criação de nova oportunidade em construtora existente
+ */
+export const criarOportunidade = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    clienteId: string;
+    marcaIds: string[];
+    descricao?: string | null | undefined;
+    contatoId?: string | null | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.clienteId) throw new Error('ID da construtora não informado.');
+    if (!data.marcaIds || data.marcaIds.length === 0) {
+      throw new Error('Selecione pelo menos uma marca.');
+    }
+
+    // 1. Checa se o cliente existe
+    const { data: cliente, error: cliErr } = await supabase
+      .from('clientes')
+      .select('id')
+      .eq('id', data.clienteId)
+      .single();
+
+    if (cliErr || !cliente) throw new Error('Construtora não encontrada.');
+
+    // 2. Se contato informado, checa se pertence a este cliente
+    if (data.contatoId) {
+      const { data: contato, error: contErr } = await supabase
+        .from('contatos')
+        .select('id, cliente_id')
+        .eq('id', data.contatoId)
+        .single();
+
+      if (contErr || !contato) throw new Error('Contato não encontrado.');
+      if (contato.cliente_id !== data.clienteId) {
+        throw new Error('O contato selecionado não pertence a esta construtora.');
+      }
+    }
+
+    // 3. Inserir oportunidade com etapa inicial 'prospeccao'
+    const { data: novaOp, error: insErr } = await supabase
+      .from('oportunidades')
+      .insert({
+        cliente_id: data.clienteId,
+        contato_id: data.contatoId || null,
+        marca_ids: data.marcaIds,
+        descricao: data.descricao?.trim() || null,
+        etapa: 'prospeccao',
+      })
+      .select()
+      .single();
+
+    if (insErr || !novaOp) throw new Error(insErr?.message || 'Erro ao criar oportunidade.');
+
+    // 4. Gravar registro tipo 'nota': "Nova oportunidade: <marcas>"
+    const { data: marcasData } = await supabase
+      .from('marcas')
+      .select('id, nome')
+      .in('id', data.marcaIds);
+
+    const marcasMap = new Map((marcasData || []).map((m: any) => [m.id, m.nome]));
+    const nomesMarcas = data.marcaIds.map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
+
+    await supabase.from('registros').insert({
+      cliente_id: data.clienteId,
+      oportunidade_id: novaOp.id,
+      contato_id: data.contatoId || null,
+      tipo: 'nota',
+      direcao: 'nenhuma',
+      texto: `Nova oportunidade: ${nomesMarcas}`,
+    });
+
+    return { success: true, oportunidade: novaOp };
+  });
+

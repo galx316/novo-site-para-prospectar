@@ -21,6 +21,7 @@ import { DialogRespondeu } from '@/components/prospeccao/dialog-respondeu';
 import { DialogRemarcar } from '@/components/prospeccao/dialog-remarcar';
 import { DialogMesclarCliente } from '@/components/prospeccao/dialog-mesclar-cliente';
 import { DialogRegistrarAtividade } from '@/components/prospeccao/dialog-registrar-atividade';
+import { DialogOportunidade, type OportunidadeEdicao } from '@/components/prospeccao/dialog-oportunidade';
 import {
   ArrowLeft,
   Building2,
@@ -99,6 +100,8 @@ function FichaClientePage() {
   const [modalRemarcar, setModalRemarcar] = useState(false);
   const [modalMesclar, setModalMesclar] = useState(false);
   const [modalAtividade, setModalAtividade] = useState(false);
+  const [modalOportunidade, setModalOportunidade] = useState(false);
+  const [oportunidadeEditando, setOportunidadeEditando] = useState<OportunidadeEdicao | null>(null);
   const [contatoSelecionado, setContatoSelecionado] = useState<any | null>(null);
   const [contatoAtividade, setContatoAtividade] = useState<any | null>(null);
 
@@ -117,9 +120,25 @@ function FichaClientePage() {
   const cliente = data?.cliente;
   const contatos = data?.contatos || [];
   const oportunidades = data?.oportunidades || [];
+  const marcas = data?.marcas || [];
   const followupDestaque = data?.followup_destaque;
   const registros = data?.registros || [];
   const atalhosDias = data?.configuracoes?.atalhos_dias || [3, 7, 15, 30];
+
+  function abrirCriarOportunidade() {
+    setOportunidadeEditando(null);
+    setModalOportunidade(true);
+  }
+
+  function abrirEditarOportunidade(op: any) {
+    setOportunidadeEditando({
+      id: op.id,
+      marca_ids: op.marca_ids || [],
+      descricao: op.descricao,
+      contato_id: op.contato_id,
+    });
+    setModalOportunidade(true);
+  }
 
   function iniciarEdicao() {
     if (!cliente) return;
@@ -741,46 +760,92 @@ function FichaClientePage() {
                 Oportunidades ({oportunidades.length})
               </h2>
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={abrirCriarOportunidade}
+              className="h-8 text-xs gap-1 font-semibold"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Nova oportunidade
+            </Button>
           </div>
 
           {oportunidades.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic py-3 text-center">
-              Nenhuma oportunidade cadastrada.
-            </p>
+            <div className="py-4 text-center space-y-2">
+              <p className="text-xs text-muted-foreground italic">
+                Nenhuma oportunidade cadastrada.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={abrirCriarOportunidade}
+                className="h-8 text-xs gap-1 font-semibold"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Cadastrar oportunidade
+              </Button>
+            </div>
           ) : (
             <div className="space-y-3">
-              {oportunidades.map((op: any) => (
-                <div
-                  key={op.id}
-                  className="rounded-lg border border-border p-3.5 space-y-2 bg-background"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap gap-1">
-                      {op.marcas.map((m: any) => (
-                        <Badge key={m.id} variant="secondary" className="text-xs font-semibold">
-                          {m.nome}
-                        </Badge>
-                      ))}
+              {oportunidades.map((op: any) => {
+                const contatoVinculado = contatos.find((c: any) => c.id === op.contato_id);
+                return (
+                  <div
+                    key={op.id}
+                    className="rounded-lg border border-border p-3.5 space-y-2 bg-background"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-1">
+                        {op.marcas.map((m: any) => (
+                          <Badge key={m.id} variant="secondary" className="text-xs font-semibold">
+                            {m.nome}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <EtapaBadge etapa={op.etapa} />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => abrirEditarOportunidade(op)}
+                          className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground gap-1"
+                        >
+                          <Edit2 className="h-3 w-3" />
+                          Editar
+                        </Button>
+                      </div>
                     </div>
-                    <EtapaBadge etapa={op.etapa} />
+
+                    {contatoVinculado && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span>
+                          Contato:{' '}
+                          <strong className="text-foreground">{contatoVinculado.nome}</strong>
+                          {contatoVinculado.cargo && ` (${contatoVinculado.cargo})`}
+                        </span>
+                      </p>
+                    )}
+
+                    {op.necessidade_prevista && (
+                      <p className="text-xs text-muted-foreground">
+                        Necessidade prevista:{' '}
+                        <strong className="text-foreground">
+                          {formatarMesAno(op.necessidade_prevista)}
+                        </strong>
+                      </p>
+                    )}
+
+                    {op.descricao && (
+                      <p className="text-xs text-foreground bg-accent/30 p-2 rounded">
+                        {op.descricao}
+                      </p>
+                    )}
                   </div>
-
-                  {op.necessidade_prevista && (
-                    <p className="text-xs text-muted-foreground">
-                      Necessidade prevista:{' '}
-                      <strong className="text-foreground">
-                        {formatarMesAno(op.necessidade_prevista)}
-                      </strong>
-                    </p>
-                  )}
-
-                  {op.descricao && (
-                    <p className="text-xs text-foreground bg-accent/30 p-2 rounded">
-                      {op.descricao}
-                    </p>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -1055,6 +1120,18 @@ function FichaClientePage() {
         contatos={contatos}
         oportunidades={oportunidades}
         atalhosDias={atalhosDias}
+        onSuccess={() => refetch()}
+      />
+      <DialogOportunidade
+        open={modalOportunidade}
+        onOpenChange={setModalOportunidade}
+        clienteId={clienteId}
+        clienteNome={cliente.nome}
+        clienteSituacaoPrado={cliente.situacao_prado}
+        clienteRepresentantePrado={cliente.representante_prado}
+        oportunidade={oportunidadeEditando}
+        contatos={contatos}
+        marcasDisponiveis={marcas}
         onSuccess={() => refetch()}
       />
       <DialogEnviei
