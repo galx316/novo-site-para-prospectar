@@ -404,7 +404,7 @@ export const editarLote = createServerFn({ method: 'POST' })
       if (rErr) throw new Error(rErr.message);
     }
 
-    if (loteAtual.status !== loteAtualizado.status) {
+    if (data.status !== undefined && data.status !== loteAtual.status) {
       const statusNome = STATUS_LOTE_LABELS[loteAtualizado.status] || loteAtualizado.status;
       const msg = `Lote ${tipoLegivel}: status alterado para ${statusNome}`;
       const { error: rErr } = await supabase.from('registros').insert({
@@ -646,6 +646,17 @@ export const reabrirObra = createServerFn({ method: 'POST' })
       .eq('id', data.obraId);
 
     if (updErr) throw new Error(updErr.message);
+
+    // Cancelar a revisão de 40 dias pendente desta obra
+    const { error: cancelFupErr } = await supabase
+      .from('followups')
+      .update({ status: 'cancelado' })
+      .eq('obra_id', data.obraId)
+      .eq('status', 'pendente')
+      .eq('origem', 'automatico')
+      .like('motivo', 'Revisão de 40 dias%');
+
+    if (cancelFupErr) throw new Error(cancelFupErr.message);
 
     const { error: regErr } = await supabase.from('registros').insert({
       obra_id: data.obraId,

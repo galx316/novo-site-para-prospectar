@@ -447,7 +447,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
           oportunidade_id: novaOp.id,
           data: obterHojeSP(),
           motivo: 'Enviar apresentação',
-          origem: 'manual',
+          origem: 'prospeccao',
           status: 'pendente',
         });
         if (followupErr) throw new Error(followupErr.message);
