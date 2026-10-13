@@ -22,6 +22,7 @@ import { DialogRemarcar } from '@/components/prospeccao/dialog-remarcar';
 import { DialogMesclarCliente } from '@/components/prospeccao/dialog-mesclar-cliente';
 import { DialogRegistrarAtividade } from '@/components/prospeccao/dialog-registrar-atividade';
 import { DialogOportunidade, type OportunidadeEdicao } from '@/components/prospeccao/dialog-oportunidade';
+import { DialogIniciarObra } from '@/components/obras/dialog-iniciar-obra';
 import {
   ArrowLeft,
   Building2,
@@ -104,6 +105,8 @@ function FichaClientePage() {
   const [oportunidadeEditando, setOportunidadeEditando] = useState<OportunidadeEdicao | null>(null);
   const [contatoSelecionado, setContatoSelecionado] = useState<any | null>(null);
   const [contatoAtividade, setContatoAtividade] = useState<any | null>(null);
+  const [modalIniciarObra, setModalIniciarObra] = useState(false);
+  const [opIniciarObraId, setOpIniciarObraId] = useState<string | null>(null);
 
   // Server functions
   const fetchFicha = useServerFn(obterFichaCliente);
@@ -128,6 +131,11 @@ function FichaClientePage() {
   function abrirCriarOportunidade() {
     setOportunidadeEditando(null);
     setModalOportunidade(true);
+  }
+
+  function abrirIniciarObra(opId: string) {
+    setOpIniciarObraId(opId);
+    setModalIniciarObra(true);
   }
 
   function abrirEditarOportunidade(op: any) {
@@ -843,6 +851,35 @@ function FichaClientePage() {
                         {op.descricao}
                       </p>
                     )}
+
+                    {/* Gestão da Obra (Marca PRADO) */}
+                    {op.marcas?.some((m: any) => m.nome?.trim().toUpperCase() === 'PRADO') && (
+                      <div className="pt-2 border-t border-border/60 flex items-center justify-end">
+                        {op.obra_id ? (
+                          <Button
+                            asChild
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs font-semibold gap-1.5 text-primary hover:text-primary"
+                          >
+                            <Link to="/obras-prado/$obraId" params={{ obraId: op.obra_id }}>
+                              <Building2 className="h-3.5 w-3.5" />
+                              Ver obra
+                            </Link>
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => abrirIniciarObra(op.id)}
+                            className="h-8 text-xs font-semibold gap-1.5"
+                          >
+                            <Building2 className="h-3.5 w-3.5" />
+                            Iniciar gestão da obra
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1176,6 +1213,13 @@ function FichaClientePage() {
           refetch();
           queryClient.invalidateQueries({ queryKey: ['prospects-lista'] });
         }}
+      />
+
+      <DialogIniciarObra
+        open={modalIniciarObra}
+        onOpenChange={setModalIniciarObra}
+        oportunidadeId={opIniciarObraId}
+        clienteNome={cliente?.nome}
       />
     </main>
   );

@@ -117,3 +117,23 @@ export function formatarMesAno(dataStr?: string | null): string {
   return formatarData(dataStr);
 }
 
+/**
+ * Retorna a diferença em dias corridos entre hoje em SP e a data informada.
+ * Valor negativo = data no passado (atrasada).
+ */
+export function diasAteData(dataStr?: string | null): number | null {
+  if (!dataStr) return null;
+  const hoje = obterHojeSP();
+  const partesH = hoje.split('-').map(Number);
+  const partesA = dataStr.slice(0, 10).split('-').map(Number);
+  const aH = partesH[0] ?? 2026;
+  const mH = partesH[1] ?? 1;
+  const dH = partesH[2] ?? 1;
+  const aA = partesA[0] ?? 2026;
+  const mA = partesA[1] ?? 1;
+  const dA = partesA[2] ?? 1;
+  const dataHoje = Date.UTC(aH, mH - 1, dH);
+  const dataAlvo = Date.UTC(aA, mA - 1, dA);
+  return Math.round((dataAlvo - dataHoje) / (1000 * 60 * 60 * 24));
+}
+

@@ -12,9 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AuthenticatedInicioRouteImport } from './routes/_authenticated/inicio'
 import { Route as AuthenticatedHojeRouteImport } from './routes/_authenticated/hoje'
-import { Route as AuthenticatedObrasPradoRouteImport } from './routes/_authenticated/obras-prado'
+import { Route as AuthenticatedInicioRouteImport } from './routes/_authenticated/inicio'
+import { Route as AuthenticatedObrasPradoIndexRouteImport } from './routes/_authenticated/obras-prado/index'
+import { Route as AuthenticatedObrasPradoObraIdRouteImport } from './routes/_authenticated/obras-prado/$obraId'
 import { Route as AuthenticatedProspeccaoIndexRouteImport } from './routes/_authenticated/prospeccao/index'
 import { Route as AuthenticatedProspeccaoClienteIdRouteImport } from './routes/_authenticated/prospeccao/$clienteId'
 
@@ -32,21 +33,28 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedInicioRoute = AuthenticatedInicioRouteImport.update({
-  id: '/inicio',
-  path: '/inicio',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedHojeRoute = AuthenticatedHojeRouteImport.update({
   id: '/hoje',
   path: '/hoje',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedObrasPradoRoute = AuthenticatedObrasPradoRouteImport.update({
-  id: '/obras-prado',
-  path: '/obras-prado',
+const AuthenticatedInicioRoute = AuthenticatedInicioRouteImport.update({
+  id: '/inicio',
+  path: '/inicio',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedObrasPradoIndexRoute =
+  AuthenticatedObrasPradoIndexRouteImport.update({
+    id: '/obras-prado/',
+    path: '/obras-prado/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedObrasPradoObraIdRoute =
+  AuthenticatedObrasPradoObraIdRouteImport.update({
+    id: '/obras-prado/$obraId',
+    path: '/obras-prado/$obraId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedProspeccaoIndexRoute =
   AuthenticatedProspeccaoIndexRouteImport.update({
     id: '/prospeccao/',
@@ -63,61 +71,67 @@ const AuthenticatedProspeccaoClienteIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
-  '/inicio': typeof AuthenticatedInicioRoute
   '/hoje': typeof AuthenticatedHojeRoute
-  '/obras-prado': typeof AuthenticatedObrasPradoRoute
-  '/prospeccao': typeof AuthenticatedProspeccaoIndexRoute
+  '/inicio': typeof AuthenticatedInicioRoute
+  '/obras-prado/$obraId': typeof AuthenticatedObrasPradoObraIdRoute
   '/prospeccao/$clienteId': typeof AuthenticatedProspeccaoClienteIdRoute
+  '/obras-prado/': typeof AuthenticatedObrasPradoIndexRoute
+  '/prospeccao/': typeof AuthenticatedProspeccaoIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
-  '/inicio': typeof AuthenticatedInicioRoute
   '/hoje': typeof AuthenticatedHojeRoute
-  '/obras-prado': typeof AuthenticatedObrasPradoRoute
-  '/prospeccao': typeof AuthenticatedProspeccaoIndexRoute
+  '/inicio': typeof AuthenticatedInicioRoute
+  '/obras-prado/$obraId': typeof AuthenticatedObrasPradoObraIdRoute
   '/prospeccao/$clienteId': typeof AuthenticatedProspeccaoClienteIdRoute
+  '/obras-prado': typeof AuthenticatedObrasPradoIndexRoute
+  '/prospeccao': typeof AuthenticatedProspeccaoIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
-  '/_authenticated/inicio': typeof AuthenticatedInicioRoute
   '/_authenticated/hoje': typeof AuthenticatedHojeRoute
-  '/_authenticated/obras-prado': typeof AuthenticatedObrasPradoRoute
-  '/_authenticated/prospeccao/': typeof AuthenticatedProspeccaoIndexRoute
+  '/_authenticated/inicio': typeof AuthenticatedInicioRoute
+  '/_authenticated/obras-prado/$obraId': typeof AuthenticatedObrasPradoObraIdRoute
   '/_authenticated/prospeccao/$clienteId': typeof AuthenticatedProspeccaoClienteIdRoute
+  '/_authenticated/obras-prado/': typeof AuthenticatedObrasPradoIndexRoute
+  '/_authenticated/prospeccao/': typeof AuthenticatedProspeccaoIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/auth'
-    | '/inicio'
     | '/hoje'
-    | '/obras-prado'
-    | '/prospeccao'
+    | '/inicio'
+    | '/obras-prado/$obraId'
     | '/prospeccao/$clienteId'
+    | '/obras-prado/'
+    | '/prospeccao/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
-    | '/inicio'
     | '/hoje'
+    | '/inicio'
+    | '/obras-prado/$obraId'
+    | '/prospeccao/$clienteId'
     | '/obras-prado'
     | '/prospeccao'
-    | '/prospeccao/$clienteId'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
-    | '/_authenticated/inicio'
     | '/_authenticated/hoje'
-    | '/_authenticated/obras-prado'
-    | '/_authenticated/prospeccao/'
+    | '/_authenticated/inicio'
+    | '/_authenticated/obras-prado/$obraId'
     | '/_authenticated/prospeccao/$clienteId'
+    | '/_authenticated/obras-prado/'
+    | '/_authenticated/prospeccao/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -149,13 +163,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/inicio': {
-      id: '/_authenticated/inicio'
-      path: '/inicio'
-      fullPath: '/inicio'
-      preLoaderRoute: typeof AuthenticatedInicioRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/hoje': {
       id: '/_authenticated/hoje'
       path: '/hoje'
@@ -163,17 +170,31 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHojeRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/obras-prado': {
-      id: '/_authenticated/obras-prado'
+    '/_authenticated/inicio': {
+      id: '/_authenticated/inicio'
+      path: '/inicio'
+      fullPath: '/inicio'
+      preLoaderRoute: typeof AuthenticatedInicioRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/obras-prado/': {
+      id: '/_authenticated/obras-prado/'
       path: '/obras-prado'
-      fullPath: '/obras-prado'
-      preLoaderRoute: typeof AuthenticatedObrasPradoRouteImport
+      fullPath: '/obras-prado/'
+      preLoaderRoute: typeof AuthenticatedObrasPradoIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/obras-prado/$obraId': {
+      id: '/_authenticated/obras-prado/$obraId'
+      path: '/obras-prado/$obraId'
+      fullPath: '/obras-prado/$obraId'
+      preLoaderRoute: typeof AuthenticatedObrasPradoObraIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/prospeccao/': {
       id: '/_authenticated/prospeccao/'
       path: '/prospeccao'
-      fullPath: '/prospeccao'
+      fullPath: '/prospeccao/'
       preLoaderRoute: typeof AuthenticatedProspeccaoIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
@@ -188,19 +209,21 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
-  AuthenticatedInicioRoute: typeof AuthenticatedInicioRoute
   AuthenticatedHojeRoute: typeof AuthenticatedHojeRoute
-  AuthenticatedObrasPradoRoute: typeof AuthenticatedObrasPradoRoute
-  AuthenticatedProspeccaoIndexRoute: typeof AuthenticatedProspeccaoIndexRoute
+  AuthenticatedInicioRoute: typeof AuthenticatedInicioRoute
+  AuthenticatedObrasPradoObraIdRoute: typeof AuthenticatedObrasPradoObraIdRoute
   AuthenticatedProspeccaoClienteIdRoute: typeof AuthenticatedProspeccaoClienteIdRoute
+  AuthenticatedObrasPradoIndexRoute: typeof AuthenticatedObrasPradoIndexRoute
+  AuthenticatedProspeccaoIndexRoute: typeof AuthenticatedProspeccaoIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
-  AuthenticatedInicioRoute: AuthenticatedInicioRoute,
   AuthenticatedHojeRoute: AuthenticatedHojeRoute,
-  AuthenticatedObrasPradoRoute: AuthenticatedObrasPradoRoute,
-  AuthenticatedProspeccaoIndexRoute: AuthenticatedProspeccaoIndexRoute,
+  AuthenticatedInicioRoute: AuthenticatedInicioRoute,
+  AuthenticatedObrasPradoObraIdRoute: AuthenticatedObrasPradoObraIdRoute,
   AuthenticatedProspeccaoClienteIdRoute: AuthenticatedProspeccaoClienteIdRoute,
+  AuthenticatedObrasPradoIndexRoute: AuthenticatedObrasPradoIndexRoute,
+  AuthenticatedProspeccaoIndexRoute: AuthenticatedProspeccaoIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

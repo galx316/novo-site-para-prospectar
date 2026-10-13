@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import type { Database } from '@/integrations/supabase/types';
+import { obterHojeSP } from '@/lib/date-utils';
 
 type TipoRegistro = Database['public']['Enums']['tipo_registro'];
 type SituacaoPrado = Database['public']['Enums']['situacao_prado'];
@@ -427,7 +428,8 @@ export const criarProspect = createServerFn({ method: 'POST' })
       if (opErr) throw new Error(opErr.message);
       oportunidadeCriadaNestaChamadaId = novaOp.id;
 
-      // 4. Se já enviou a apresentação, registrar o envio chamando a RPC registrar_envio
+      // 4. Se já enviou a apresentação, registrar o envio chamando a RPC registrar_envio.
+      // Se não enviou, criar follow-up para hoje (São Paulo) para não ficar sem próximo passo.
       if (data.jaEnviouApresentacao) {
         const canal = data.canalEnvio || 'whatsapp';
         const { error: envioErr } = await supabase.rpc('registrar_envio', {
@@ -438,6 +440,17 @@ export const criarProspect = createServerFn({ method: 'POST' })
           ...(data.dataProximaEnvio ? { p_data_proxima: data.dataProximaEnvio } : {}),
         });
         if (envioErr) throw new Error(envioErr.message);
+      } else {
+        const { error: followupErr } = await supabase.from('followups').insert({
+          cliente_id: clienteId,
+          contato_id: novoContato.id,
+          oportunidade_id: novaOp.id,
+          data: obterHojeSP(),
+          motivo: 'Enviar apresentação',
+          origem: 'manual',
+          status: 'pendente',
+        });
+        if (followupErr) throw new Error(followupErr.message);
       }
 
       return {
@@ -844,7 +857,8 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
 
     if (!data.clienteId) throw new Error('ID da construtora não informado.');
     if (!data.oportunidadeId) throw new Error('ID da oportunidade não informado.');
-    if (!data.marcaIds || data.marcaIds.length === 0) {
+    const marcaIdsUnicos = Array.from(new Set(data.marcaIds));
+    if (marcaIdsUnicos.length === 0) {
       throw new Error('Selecione pelo menos uma marca.');
     }
 
@@ -878,7 +892,7 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
     const { data: opAtualizada, error: updErr } = await supabase
       .from('oportunidades')
       .update({
-        marca_ids: data.marcaIds,
+        marca_ids: marcaIdsUnicos,
         descricao: data.descricao?.trim() || null,
         contato_id: data.contatoId || null,
       })
@@ -891,21 +905,23 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
     // 4. Se as marcas mudaram, gravar registro tipo 'nota' no histórico:
     // "Marcas alteradas: <antes> → <depois>"
     const antesIds = [...(opExistente.marca_ids || [])].sort();
-    const depoisIds = [...data.marcaIds].sort();
+    const depoisIds = [...marcaIdsUnicos].sort();
     const marcasMudaram = JSON.stringify(antesIds) !== JSON.stringify(depoisIds);
 
     if (marcasMudaram) {
       const todosIds = Array.from(new Set([...antesIds, ...depoisIds]));
-      const { data: marcasData } = await supabase
+      const { data: marcasData, error: marcasErr } = await supabase
         .from('marcas')
         .select('id, nome')
         .in('id', todosIds);
 
+      if (marcasErr) throw new Error(marcasErr.message);
+
       const marcasMap = new Map((marcasData || []).map((m: any) => [m.id, m.nome]));
       const nomesAntes = (opExistente.marca_ids || []).map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
-      const nomesDepois = data.marcaIds.map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
+      const nomesDepois = marcaIdsUnicos.map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
 
-      await supabase.from('registros').insert({
+      const { error: regErr } = await supabase.from('registros').insert({
         cliente_id: data.clienteId,
         oportunidade_id: data.oportunidadeId,
         contato_id: data.contatoId || null,
@@ -913,6 +929,7 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
         direcao: 'nenhuma',
         texto: `Marcas alteradas: ${nomesAntes} → ${nomesDepois}`,
       });
+      if (regErr) throw new Error(regErr.message);
     }
 
     return { success: true, oportunidade: opAtualizada };
@@ -934,7 +951,8 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
     await assertAuthorized(supabase);
 
     if (!data.clienteId) throw new Error('ID da construtora não informado.');
-    if (!data.marcaIds || data.marcaIds.length === 0) {
+    const marcaIdsUnicos = Array.from(new Set(data.marcaIds));
+    if (marcaIdsUnicos.length === 0) {
       throw new Error('Selecione pelo menos uma marca.');
     }
 
@@ -967,7 +985,7 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
       .insert({
         cliente_id: data.clienteId,
         contato_id: data.contatoId || null,
-        marca_ids: data.marcaIds,
+        marca_ids: marcaIdsUnicos,
         descricao: data.descricao?.trim() || null,
         etapa: 'prospeccao',
       })
@@ -977,15 +995,17 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
     if (insErr || !novaOp) throw new Error(insErr?.message || 'Erro ao criar oportunidade.');
 
     // 4. Gravar registro tipo 'nota': "Nova oportunidade: <marcas>"
-    const { data: marcasData } = await supabase
+    const { data: marcasData, error: marcasErr } = await supabase
       .from('marcas')
       .select('id, nome')
-      .in('id', data.marcaIds);
+      .in('id', marcaIdsUnicos);
+
+    if (marcasErr) throw new Error(marcasErr.message);
 
     const marcasMap = new Map((marcasData || []).map((m: any) => [m.id, m.nome]));
-    const nomesMarcas = data.marcaIds.map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
+    const nomesMarcas = marcaIdsUnicos.map((id: string) => marcasMap.get(id) || id).join(', ') || 'Nenhuma';
 
-    await supabase.from('registros').insert({
+    const { error: regErr } = await supabase.from('registros').insert({
       cliente_id: data.clienteId,
       oportunidade_id: novaOp.id,
       contato_id: data.contatoId || null,
@@ -993,6 +1013,7 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
       direcao: 'nenhuma',
       texto: `Nova oportunidade: ${nomesMarcas}`,
     });
+    if (regErr) throw new Error(regErr.message);
 
     return { success: true, oportunidade: novaOp };
   });
