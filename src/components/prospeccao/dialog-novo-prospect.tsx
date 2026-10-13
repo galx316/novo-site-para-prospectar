@@ -78,6 +78,7 @@ export function DialogNovoProspect({
   const [novaMarcaNome, setNovaMarcaNome] = useState('');
   const [adicionandoMarca, setAdicionandoMarca] = useState(false);
   const [descricao, setDescricao] = useState('');
+  const [etapa, setEtapa] = useState<'prospeccao' | 'orcamento' | 'negociacao' | 'perdido'>('prospeccao');
 
   // Construtora existente selecionada (opcional)
   const [clienteSelecionado, setClienteSelecionado] = useState<{
@@ -137,6 +138,7 @@ export function DialogNovoProspect({
 
       setNovaMarcaNome('');
       setDescricao('');
+      setEtapa('prospeccao');
       setClienteSelecionado(null);
       setSugestoes([]);
       setIgnorarParecidas(false);
@@ -267,6 +269,7 @@ export function DialogNovoProspect({
           email: email.trim() || undefined,
           marcaIds: marcasSelecionadas,
           descricao: descricao.trim() || undefined,
+          etapa,
           jaEnviouApresentacao,
           canalEnvio: jaEnviouApresentacao ? canalEnvio : undefined,
         },
@@ -658,18 +661,36 @@ export function DialogNovoProspect({
             )}
           </div>
 
-          {/* 4. Descrição opcional */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
-              Descrição / Observações da oportunidade (opcional)
-            </label>
-            <Textarea
-              placeholder="Ex: Empreendimento em fase de projeto executivo, entrega para final do ano."
-              value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
-              rows={2}
-              className="resize-none bg-card"
-            />
+          {/* 4. Etapa e Descrição */}
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
+                Etapa da oportunidade
+              </label>
+              <select
+                value={etapa}
+                onChange={(e) => setEtapa(e.target.value as any)}
+                className="w-full h-11 px-3 rounded-lg border border-input bg-card text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="prospeccao">Prospecção (padrão)</option>
+                <option value="orcamento">Orçamento</option>
+                <option value="negociacao">Negociação</option>
+                <option value="perdido">Perdido</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
+                Descrição / Observações da oportunidade (opcional)
+              </label>
+              <Textarea
+                placeholder="Ex: Empreendimento em fase de projeto executivo, entrega para final do ano."
+                value={descricao}
+                onChange={(e) => setDescricao(e.target.value)}
+                rows={2}
+                className="resize-none bg-card"
+              />
+            </div>
           </div>
 
           {/* 5. Pergunta: Já enviou a apresentação? */}

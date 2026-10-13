@@ -287,10 +287,16 @@ export const criarProspect = createServerFn({ method: 'POST' })
     jaEnviouApresentacao?: boolean | undefined;
     canalEnvio?: TipoRegistro | undefined;
     dataProximaEnvio?: string | undefined;
+    etapa?: 'prospeccao' | 'orcamento' | 'negociacao' | 'perdido' | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     await assertAuthorized(supabase);
+
+    const etapasPermitidas = ['prospeccao', 'orcamento', 'negociacao', 'perdido'];
+    if (data.etapa && !etapasPermitidas.includes(data.etapa)) {
+      throw new Error('Etapa inválida. Valores aceitos: Prospecção, Orçamento, Negociação ou Perdido.');
+    }
 
     const whatsappLimpo = data.whatsapp?.trim();
     const emailLimpo = data.email?.trim()?.toLowerCase();
@@ -413,6 +419,8 @@ export const criarProspect = createServerFn({ method: 'POST' })
         throw new Error('Selecione pelo menos uma marca para a oportunidade.');
       }
 
+      const etapaInicial = data.etapa || 'prospeccao';
+
       const { data: novaOp, error: opErr } = await supabase
         .from('oportunidades')
         .insert({
@@ -420,7 +428,7 @@ export const criarProspect = createServerFn({ method: 'POST' })
           contato_id: novoContato.id,
           marca_ids: data.marcaIds,
           descricao: data.descricao?.trim() || null,
-          etapa: 'prospeccao',
+          etapa: etapaInicial,
         })
         .select()
         .single();
@@ -532,6 +540,7 @@ export const registrarEnvio = createServerFn({ method: 'POST' })
     oportunidadeId?: string | undefined;
     texto?: string | undefined;
     dataProxima?: string | undefined;
+    motivo?: string | null | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -545,6 +554,19 @@ export const registrarEnvio = createServerFn({ method: 'POST' })
       ...(data.dataProxima ? { p_data_proxima: data.dataProxima } : {}),
     });
     if (error) throw new Error(error.message);
+
+    const motivoLimpo = data.motivo?.trim();
+    if (motivoLimpo) {
+      const { error: updErr } = await supabase
+        .from('followups')
+        .update({ motivo: motivoLimpo })
+        .eq('contato_id', data.contatoId)
+        .eq('origem', 'prospeccao')
+        .eq('status', 'pendente');
+
+      if (updErr) throw new Error(updErr.message);
+    }
+
     return { success: true };
   });
 
@@ -850,10 +872,16 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
     marcaIds: string[];
     descricao?: string | null | undefined;
     contatoId?: string | null | undefined;
+    etapa?: 'prospeccao' | 'orcamento' | 'negociacao' | 'perdido' | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     await assertAuthorized(supabase);
+
+    const etapasPermitidas = ['prospeccao', 'orcamento', 'negociacao', 'perdido'];
+    if (data.etapa && !etapasPermitidas.includes(data.etapa)) {
+      throw new Error('Etapa inválida. Valores aceitos: Prospecção, Orçamento, Negociação ou Perdido.');
+    }
 
     if (!data.clienteId) throw new Error('ID da construtora não informado.');
     if (!data.oportunidadeId) throw new Error('ID da oportunidade não informado.');
@@ -889,18 +917,48 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
     }
 
     // 3. Atualizar oportunidade
+    const updates: any = {
+      marca_ids: marcaIdsUnicos,
+      descricao: data.descricao?.trim() || null,
+      contato_id: data.contatoId || null,
+    };
+    if (data.etapa) {
+      updates.etapa = data.etapa;
+    }
+
     const { data: opAtualizada, error: updErr } = await supabase
       .from('oportunidades')
-      .update({
-        marca_ids: marcaIdsUnicos,
-        descricao: data.descricao?.trim() || null,
-        contato_id: data.contatoId || null,
-      })
+      .update(updates)
       .eq('id', data.oportunidadeId)
       .select()
       .single();
 
     if (updErr) throw new Error(updErr.message);
+
+    // Se a etapa mudou, gravar registro tipo 'nota': "Etapa alterada: <antes> → <depois>"
+    if (data.etapa && data.etapa !== opExistente.etapa) {
+      const ETAPAS_LABELS: Record<string, string> = {
+        prospeccao: 'Prospecção',
+        aguardando_demanda: 'Aguardando demanda',
+        demanda_prevista: 'Demanda prevista',
+        orcamento: 'Orçamento',
+        negociacao: 'Negociação',
+        fechado: 'Fechado',
+        perdido: 'Perdido',
+      };
+      const antesNome = ETAPAS_LABELS[opExistente.etapa] || opExistente.etapa;
+      const depoisNome = ETAPAS_LABELS[data.etapa] || data.etapa;
+
+      const { error: regEtapaErr } = await supabase.from('registros').insert({
+        cliente_id: data.clienteId,
+        oportunidade_id: data.oportunidadeId,
+        contato_id: data.contatoId || null,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: `Etapa alterada: ${antesNome} → ${depoisNome}`,
+      });
+      if (regEtapaErr) throw new Error(regEtapaErr.message);
+    }
 
     // 4. Se as marcas mudaram, gravar registro tipo 'nota' no histórico:
     // "Marcas alteradas: <antes> → <depois>"
@@ -945,10 +1003,16 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
     marcaIds: string[];
     descricao?: string | null | undefined;
     contatoId?: string | null | undefined;
+    etapa?: 'prospeccao' | 'orcamento' | 'negociacao' | 'perdido' | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     await assertAuthorized(supabase);
+
+    const etapasPermitidas = ['prospeccao', 'orcamento', 'negociacao', 'perdido'];
+    if (data.etapa && !etapasPermitidas.includes(data.etapa)) {
+      throw new Error('Etapa inválida. Valores aceitos: Prospecção, Orçamento, Negociação ou Perdido.');
+    }
 
     if (!data.clienteId) throw new Error('ID da construtora não informado.');
     const marcaIdsUnicos = Array.from(new Set(data.marcaIds));
@@ -979,7 +1043,9 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
       }
     }
 
-    // 3. Inserir oportunidade com etapa inicial 'prospeccao'
+    // 3. Inserir oportunidade com etapa informada ou inicial 'prospeccao'
+    const etapaInicial = data.etapa || 'prospeccao';
+
     const { data: novaOp, error: insErr } = await supabase
       .from('oportunidades')
       .insert({
@@ -987,7 +1053,7 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
         contato_id: data.contatoId || null,
         marca_ids: marcaIdsUnicos,
         descricao: data.descricao?.trim() || null,
-        etapa: 'prospeccao',
+        etapa: etapaInicial,
       })
       .select()
       .single();

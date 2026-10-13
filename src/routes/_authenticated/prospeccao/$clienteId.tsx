@@ -23,6 +23,7 @@ import { DialogMesclarCliente } from '@/components/prospeccao/dialog-mesclar-cli
 import { DialogRegistrarAtividade } from '@/components/prospeccao/dialog-registrar-atividade';
 import { DialogOportunidade, type OportunidadeEdicao } from '@/components/prospeccao/dialog-oportunidade';
 import { DialogIniciarObra } from '@/components/obras/dialog-iniciar-obra';
+import { DialogCadastrarObraFechada } from '@/components/obras/dialog-cadastrar-obra-fechada';
 import {
   ArrowLeft,
   Building2,
@@ -107,6 +108,7 @@ function FichaClientePage() {
   const [contatoAtividade, setContatoAtividade] = useState<any | null>(null);
   const [modalIniciarObra, setModalIniciarObra] = useState(false);
   const [opIniciarObraId, setOpIniciarObraId] = useState<string | null>(null);
+  const [modalCadastrarObraFechada, setModalCadastrarObraFechada] = useState(false);
 
   // Server functions
   const fetchFicha = useServerFn(obterFichaCliente);
@@ -128,6 +130,20 @@ function FichaClientePage() {
   const registros = data?.registros || [];
   const atalhosDias = data?.configuracoes?.atalhos_dias || [3, 7, 15, 30];
 
+  // Regra 1.2: Valor inicial do contato: o contato da oportunidade em foco, se houver; senão o contato selecionado; senão o primeiro.
+  const opEmFoco = followupDestaque?.oportunidade_id
+    ? oportunidades.find((o: any) => o.id === followupDestaque.oportunidade_id)
+    : null;
+  const contatoDaOpEmFoco = opEmFoco?.contato_id
+    ? contatos.find((c: any) => c.id === opEmFoco.contato_id)
+    : null;
+  const contatoInicial =
+    contatoDaOpEmFoco ||
+    contatoSelecionado ||
+    (followupDestaque?.contato_id ? contatos.find((c: any) => c.id === followupDestaque.contato_id) : null) ||
+    contatos[0] ||
+    null;
+
   function abrirCriarOportunidade() {
     setOportunidadeEditando(null);
     setModalOportunidade(true);
@@ -144,6 +160,7 @@ function FichaClientePage() {
       marca_ids: op.marca_ids || [],
       descricao: op.descricao,
       contato_id: op.contato_id,
+      etapa: op.etapa,
     });
     setModalOportunidade(true);
   }
@@ -768,15 +785,26 @@ function FichaClientePage() {
                 Oportunidades ({oportunidades.length})
               </h2>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={abrirCriarOportunidade}
-              className="h-8 text-xs gap-1 font-semibold"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Nova oportunidade
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setModalCadastrarObraFechada(true)}
+                className="h-8 text-xs gap-1 font-semibold"
+              >
+                <Building2 className="h-3.5 w-3.5 text-primary" />
+                Cadastrar obra já fechada
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={abrirCriarOportunidade}
+                className="h-8 text-xs gap-1 font-semibold"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Nova oportunidade
+              </Button>
+            </div>
           </div>
 
           {oportunidades.length === 0 ? (
@@ -1174,8 +1202,9 @@ function FichaClientePage() {
       <DialogEnviei
         open={modalEnviei}
         onOpenChange={setModalEnviei}
-        contatoId={contatoSelecionado?.id || contatos[0]?.id}
-        contatoNome={contatoSelecionado?.nome || contatos[0]?.nome}
+        contatoId={contatoInicial?.id}
+        contatoNome={contatoInicial?.nome}
+        contatos={contatos}
         clienteNome={cliente.nome}
         oportunidades={oportunidades}
         atalhosDias={atalhosDias}
@@ -1185,10 +1214,22 @@ function FichaClientePage() {
       <DialogRespondeu
         open={modalRespondeu}
         onOpenChange={setModalRespondeu}
-        contatoId={contatoSelecionado?.id || contatos[0]?.id}
-        contatoNome={contatoSelecionado?.nome || contatos[0]?.nome}
+        contatoId={contatoInicial?.id}
+        contatoNome={contatoInicial?.nome}
+        contatos={contatos}
         clienteNome={cliente.nome}
         oportunidades={oportunidades}
+        onSuccess={() => refetch()}
+      />
+
+      <DialogCadastrarObraFechada
+        open={modalCadastrarObraFechada}
+        onOpenChange={setModalCadastrarObraFechada}
+        clienteId={clienteId}
+        clienteNome={cliente.nome}
+        clienteSituacaoPrado={cliente.situacao_prado}
+        clienteRepresentantePrado={cliente.representante_prado}
+        contatos={contatos}
         onSuccess={() => refetch()}
       />
 

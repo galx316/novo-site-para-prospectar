@@ -196,7 +196,13 @@ export const obterObra = createServerFn({ method: 'GET' })
  */
 export const iniciarGestaoObra = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
-  .validator((data: { oportunidadeId: string; nome: string }) => data)
+  .validator((data: {
+    oportunidadeId: string;
+    nome: string;
+    cidade?: string | null | undefined;
+    dataFechamento?: string | null | undefined;
+    jaEmAndamento?: boolean | undefined;
+  }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     await assertAuthorized(supabase);
@@ -211,7 +217,161 @@ export const iniciarGestaoObra = createServerFn({ method: 'POST' })
     });
 
     if (error) throw new Error(error.message);
+
+    // Se vier cidade ou dataFechamento, update em obras
+    const updatesObra: any = {};
+    if (data.cidade !== undefined) updatesObra.cidade = data.cidade?.trim() || null;
+    if (data.dataFechamento !== undefined && data.dataFechamento) {
+      updatesObra.data_fechamento = data.dataFechamento;
+    }
+
+    if (Object.keys(updatesObra).length > 0) {
+      const { error: updErr } = await supabase
+        .from('obras')
+        .update(updatesObra)
+        .eq('id', obraId);
+      if (updErr) throw new Error(updErr.message);
+    }
+
+    // Se jaEmAndamento = true: cancelar as 3 tarefas iniciais
+    if (data.jaEmAndamento) {
+      const { error: cancelErr } = await supabase
+        .from('followups')
+        .update({ status: 'cancelado' })
+        .eq('obra_id', obraId)
+        .eq('status', 'pendente')
+        .eq('origem', 'automatico')
+        .in('motivo', ['Solicitar laudos e ARTs', 'Cadastrar pedido completo', 'Agendar medição']);
+      if (cancelErr) throw new Error(cancelErr.message);
+    }
+
     return { obraId: obraId as string };
+  });
+
+/**
+ * 3.1 Cadastrar obra já fechada (cria oportunidade PRADO em negociacao e inicia gestão).
+ */
+export const cadastrarObraFechada = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    clienteId: string;
+    contatoId?: string | null | undefined;
+    nome: string;
+    cidade?: string | null | undefined;
+    dataFechamento?: string | null | undefined;
+    jaEmAndamento?: boolean | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    const nomeLimpo = data.nome?.trim();
+    if (!nomeLimpo) throw new Error('Informe o nome da obra.');
+    if (!data.clienteId) throw new Error('ID da construtora não informado.');
+
+    // a) buscar id da marca PRADO
+    const { data: marcaPrado, error: marcaErr } = await supabase
+      .from('marcas')
+      .select('id')
+      .eq('nome', 'PRADO')
+      .single();
+
+    if (marcaErr || !marcaPrado) throw new Error('Marca PRADO não encontrada.');
+
+    // b) insert em oportunidades: cliente_id, contato_id, marca_ids [PRADO], descricao = nome da obra, etapa 'negociacao'
+    const { data: novaOp, error: opErr } = await supabase
+      .from('oportunidades')
+      .insert({
+        cliente_id: data.clienteId,
+        contato_id: data.contatoId || null,
+        marca_ids: [marcaPrado.id],
+        descricao: nomeLimpo,
+        etapa: 'negociacao',
+      })
+      .select()
+      .single();
+
+    if (opErr || !novaOp) throw new Error(opErr?.message || 'Erro ao criar oportunidade.');
+
+    // c) chamar RPC iniciar_gestao_obra
+    let obraId: string;
+    try {
+      const { data: resObraId, error: rpcErr } = await supabase.rpc('iniciar_gestao_obra', {
+        p_oportunidade_id: novaOp.id,
+        p_nome: nomeLimpo,
+      });
+
+      if (rpcErr) throw new Error(rpcErr.message);
+      obraId = resObraId as string;
+    } catch (rpcFail: any) {
+      // d) se a RPC falhar, apagar a oportunidade criada
+      await supabase.from('oportunidades').delete().eq('id', novaOp.id);
+      throw new Error(rpcFail.message || 'Erro ao iniciar gestão da obra.');
+    }
+
+    const updatesObra: any = {};
+    if (data.cidade !== undefined) updatesObra.cidade = data.cidade?.trim() || null;
+    if (data.dataFechamento !== undefined && data.dataFechamento) {
+      updatesObra.data_fechamento = data.dataFechamento;
+    }
+
+    if (Object.keys(updatesObra).length > 0) {
+      const { error: updErr } = await supabase
+        .from('obras')
+        .update(updatesObra)
+        .eq('id', obraId);
+      if (updErr) throw new Error(updErr.message);
+    }
+
+    if (data.jaEmAndamento) {
+      const { error: cancelErr } = await supabase
+        .from('followups')
+        .update({ status: 'cancelado' })
+        .eq('obra_id', obraId)
+        .eq('status', 'pendente')
+        .eq('origem', 'automatico')
+        .in('motivo', ['Solicitar laudos e ARTs', 'Cadastrar pedido completo', 'Agendar medição']);
+      if (cancelErr) throw new Error(cancelErr.message);
+    }
+
+    return { obraId };
+  });
+
+/**
+ * 3.2 Editar dados da obra (nome, cidade, data_fechamento, observacoes).
+ */
+export const editarObra = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    nome: string;
+    cidade?: string | null | undefined;
+    dataFechamento?: string | null | undefined;
+    observacoes?: string | null | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    const nomeLimpo = data.nome?.trim();
+    if (!nomeLimpo) throw new Error('Informe o nome da obra.');
+
+    const { data: obraAtualizada, error: updErr } = await supabase
+      .from('obras')
+      .update({
+        nome: nomeLimpo,
+        cidade: data.cidade?.trim() || null,
+        data_fechamento: data.dataFechamento || null,
+        observacoes: data.observacoes?.trim() || null,
+      })
+      .eq('id', data.obraId)
+      .select()
+      .single();
+
+    if (updErr || !obraAtualizada) throw new Error(updErr?.message || 'Erro ao atualizar dados da obra.');
+
+    return { obra: obraAtualizada };
   });
 
 /**
@@ -429,6 +589,7 @@ export const marcarItemChecklist = createServerFn({ method: 'POST' })
   .validator((data: {
     itemId: string;
     feito: boolean;
+    data?: string | null | undefined;
     nota?: string | null | undefined;
     obraId?: string | undefined;
   }) => data)
@@ -451,7 +612,7 @@ export const marcarItemChecklist = createServerFn({ method: 'POST' })
 
     const updates: any = {
       feito: data.feito,
-      feito_em: data.feito ? obterHojeSP() : null,
+      feito_em: data.feito ? (data.data || obterHojeSP()) : null,
     };
     if (data.nota !== undefined) {
       updates.nota = data.nota?.trim() || null;
@@ -519,6 +680,7 @@ export const registrarNotaObra = createServerFn({ method: 'POST' })
     loteId?: string | null | undefined;
     tipo: TipoRegistro;
     texto: string;
+    data?: string | null | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -564,22 +726,86 @@ export const registrarNotaObra = createServerFn({ method: 'POST' })
       }
     }
 
+    const insertPayload: any = {
+      obra_id: data.obraId,
+      lote_id: data.loteId || null,
+      cliente_id: obra.cliente_id,
+      tipo: data.tipo,
+      direcao: 'nenhuma',
+      texto: textoLimpo,
+    };
+
+    if (data.data) {
+      insertPayload.data = `${data.data}T12:00:00-03:00`;
+    }
+
     const { data: novoRegistro, error: regErr } = await supabase
       .from('registros')
-      .insert({
-        obra_id: data.obraId,
-        lote_id: data.loteId || null,
-        cliente_id: obra.cliente_id,
-        tipo: data.tipo,
-        direcao: 'nenhuma',
-        texto: textoLimpo,
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
     if (regErr || !novoRegistro) throw new Error(regErr?.message || 'Erro ao gravar registro.');
 
     return { registro: novoRegistro };
+  });
+
+/**
+ * 8.1 Criar follow-up específico da obra.
+ */
+export const criarFollowupObra = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    loteId?: string | null | undefined;
+    data: string;
+    motivo: string;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    if (!data.data) throw new Error('Data do follow-up não informada.');
+    if (!data.motivo?.trim()) throw new Error('Motivo do follow-up não informado.');
+
+    const { data: obra, error: obraErr } = await supabase
+      .from('obras')
+      .select('id, cliente_id')
+      .eq('id', data.obraId)
+      .single();
+
+    if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
+
+    if (data.loteId) {
+      const { data: lote, error: loteErr } = await supabase
+        .from('lotes')
+        .select('id, obra_id')
+        .eq('id', data.loteId)
+        .single();
+      if (loteErr || !lote) throw new Error('Lote não encontrado.');
+      if (lote.obra_id !== data.obraId) {
+        throw new Error('O lote selecionado não pertence a esta obra.');
+      }
+    }
+
+    const { data: novoFup, error: insErr } = await supabase
+      .from('followups')
+      .insert({
+        obra_id: data.obraId,
+        cliente_id: obra.cliente_id,
+        lote_id: data.loteId || null,
+        data: data.data,
+        motivo: data.motivo.trim(),
+        origem: 'obra',
+        status: 'pendente',
+      })
+      .select()
+      .single();
+
+    if (insErr || !novoFup) throw new Error(insErr?.message || 'Erro ao criar follow-up da obra.');
+
+    return { followup: novoFup };
   });
 
 /**
@@ -679,6 +905,7 @@ export const registrarArquivo = createServerFn({ method: 'POST' })
   .validator((data: {
     obraId: string;
     loteId?: string | null | undefined;
+    registroId?: string | null | undefined;
     nome: string;
     mime?: string | null | undefined;
     tamanho?: number | null | undefined;
@@ -714,11 +941,25 @@ export const registrarArquivo = createServerFn({ method: 'POST' })
       }
     }
 
+    if (data.registroId) {
+      const { data: reg, error: regErr } = await supabase
+        .from('registros')
+        .select('id, obra_id')
+        .eq('id', data.registroId)
+        .single();
+
+      if (regErr || !reg) throw new Error(regErr?.message || 'Registro não encontrado.');
+      if (reg.obra_id !== data.obraId) {
+        throw new Error('O registro selecionado não pertence a esta obra.');
+      }
+    }
+
     const { data: novoArquivo, error: arqErr } = await supabase
       .from('arquivos')
       .insert({
         obra_id: data.obraId,
         lote_id: data.loteId || null,
+        registro_id: data.registroId || null,
         nome: data.nome.trim(),
         mime: data.mime || null,
         tamanho: data.tamanho ?? null,

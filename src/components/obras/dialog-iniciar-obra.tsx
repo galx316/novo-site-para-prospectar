@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useServerFn } from '@tanstack/react-start';
 import { iniciarGestaoObra } from '@/lib/obras.functions';
+import { obterHojeSP } from '@/lib/date-utils';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Building2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -30,14 +32,26 @@ export function DialogIniciarObra({
 }: DialogIniciarObraProps) {
   const navigate = useNavigate();
   const [nome, setNome] = useState('');
+  const [cidade, setCidade] = useState('');
+  const [dataFechamento, setDataFechamento] = useState(obterHojeSP());
+  const [jaEmAndamento, setJaEmAndamento] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
   const executarIniciarGestao = useServerFn(iniciarGestaoObra);
 
   function resetForm() {
     setNome('');
+    setCidade('');
+    setDataFechamento(obterHojeSP());
+    setJaEmAndamento(false);
     setSalvando(false);
   }
+
+  useEffect(() => {
+    if (open) {
+      setDataFechamento(obterHojeSP());
+    }
+  }, [open]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,6 +71,9 @@ export function DialogIniciarObra({
         data: {
           oportunidadeId,
           nome: nomeLimpo,
+          cidade: cidade.trim() || undefined,
+          dataFechamento: dataFechamento || undefined,
+          jaEmAndamento,
         },
       });
 
@@ -113,6 +130,49 @@ export function DialogIniciarObra({
               autoFocus
               className="h-10"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="cidade-obra" className="text-xs font-semibold text-foreground">
+              Cidade (opcional)
+            </label>
+            <Input
+              id="cidade-obra"
+              placeholder="Ex: Paulínia"
+              value={cidade}
+              onChange={(e) => setCidade(e.target.value)}
+              disabled={salvando}
+              className="h-10"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="data-fechamento" className="text-xs font-semibold text-foreground">
+              Data de fechamento
+            </label>
+            <Input
+              id="data-fechamento"
+              type="date"
+              value={dataFechamento}
+              onChange={(e) => setDataFechamento(e.target.value)}
+              disabled={salvando}
+              className="h-10"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <Checkbox
+              id="ja-em-andamento"
+              checked={jaEmAndamento}
+              onCheckedChange={(c) => setJaEmAndamento(!!c)}
+              disabled={salvando}
+            />
+            <label
+              htmlFor="ja-em-andamento"
+              className="text-xs font-medium text-foreground cursor-pointer"
+            >
+              Obra já em andamento (não criar as tarefas iniciais)
+            </label>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0 pt-2">

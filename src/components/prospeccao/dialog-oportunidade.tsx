@@ -26,6 +26,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { EtapaBadge } from './etapa-badge';
 import type { Database } from '@/integrations/supabase/types';
 
 type SituacaoPrado = Database['public']['Enums']['situacao_prado'];
@@ -35,6 +36,7 @@ export interface OportunidadeEdicao {
   marca_ids: string[];
   descricao?: string | null;
   contato_id?: string | null;
+  etapa?: string | null;
 }
 
 interface DialogOportunidadeProps {
@@ -70,8 +72,13 @@ export function DialogOportunidade({
   const [adicionandoMarca, setAdicionandoMarca] = useState(false);
   const [descricao, setDescricao] = useState('');
   const [contatoId, setContatoId] = useState<string>('');
+  const [etapa, setEtapa] = useState<'prospeccao' | 'orcamento' | 'negociacao' | 'perdido'>('prospeccao');
   const [confirmouPradoOutroRep, setConfirmouPradoOutroRep] = useState(false);
   const [carregando, setCarregando] = useState(false);
+
+  const etapaBloqueada =
+    isEditing &&
+    ['aguardando_demanda', 'demanda_prevista', 'fechado'].includes(oportunidade?.etapa || '');
 
   const fnEditar = useServerFn(editarOportunidade);
   const fnCriar = useServerFn(criarOportunidade);
@@ -90,12 +97,21 @@ export function DialogOportunidade({
         setMarcasSelecionadas([...marcasOpIds]);
         setDescricao(oportunidade.descricao || '');
         setContatoId(oportunidade.contato_id || '');
+        if (
+          oportunidade.etapa &&
+          ['prospeccao', 'orcamento', 'negociacao', 'perdido'].includes(oportunidade.etapa)
+        ) {
+          setEtapa(oportunidade.etapa as any);
+        } else {
+          setEtapa('prospeccao');
+        }
         setConfirmouPradoOutroRep(true);
       } else {
         const prado = ativasEExistentes.find((m: any) => m.nome === 'PRADO');
         setMarcasSelecionadas(prado ? [prado.id] : ativasEExistentes.slice(0, 1).map((m: any) => m.id));
         setDescricao('');
         setContatoId('');
+        setEtapa('prospeccao');
         setConfirmouPradoOutroRep(false);
       }
       setNovaMarcaNome('');
@@ -159,6 +175,7 @@ export function DialogOportunidade({
             marcaIds: marcasSelecionadas,
             descricao: descricao.trim() || undefined,
             contatoId: contatoId || undefined,
+            etapa: !etapaBloqueada ? etapa : undefined,
           },
         });
         toast.success('Oportunidade atualizada com sucesso!');
@@ -169,6 +186,7 @@ export function DialogOportunidade({
             marcaIds: marcasSelecionadas,
             descricao: descricao.trim() || undefined,
             contatoId: contatoId || undefined,
+            etapa,
           },
         });
         toast.success('Nova oportunidade criada com sucesso!');
@@ -291,7 +309,33 @@ export function DialogOportunidade({
             )}
           </div>
 
-          {/* 2. Contato principal */}
+          {/* 2. Etapa da oportunidade */}
+          <div className="space-y-1 pt-1 border-t border-border">
+            <label className="text-xs font-semibold text-muted-foreground block mb-1">
+              Etapa
+            </label>
+            {etapaBloqueada ? (
+              <div className="flex items-center gap-2 py-1">
+                <EtapaBadge etapa={oportunidade?.etapa as any} />
+                <span className="text-xs text-muted-foreground">
+                  (Etapa gerenciada pelo fluxo da obra/oportunidade)
+                </span>
+              </div>
+            ) : (
+              <select
+                value={etapa}
+                onChange={(e) => setEtapa(e.target.value as any)}
+                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-xs font-medium"
+              >
+                <option value="prospeccao">Prospecção</option>
+                <option value="orcamento">Orçamento</option>
+                <option value="negociacao">Negociação</option>
+                <option value="perdido">Perdido</option>
+              </select>
+            )}
+          </div>
+
+          {/* 3. Contato principal */}
           <div className="space-y-1 pt-1 border-t border-border">
             <label className="text-xs font-semibold text-muted-foreground block mb-1">
               Contato principal (opcional)

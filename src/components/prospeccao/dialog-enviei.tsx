@@ -25,11 +25,18 @@ export interface OportunidadeItem {
   marcas?: Array<{ id: string; nome: string; [key: string]: any }> | null;
 }
 
+export interface ContatoItem {
+  id: string;
+  nome: string;
+  cargo?: string | null;
+}
+
 interface DialogEnvieiProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contatoId?: string;
   contatoNome?: string;
+  contatos?: ContatoItem[];
   clienteNome?: string;
   oportunidades?: OportunidadeItem[];
   atalhosDias?: number[];
@@ -41,21 +48,39 @@ export function DialogEnviei({
   onOpenChange,
   contatoId,
   contatoNome,
+  contatos,
   clienteNome,
   oportunidades = [],
   atalhosDias = [3, 7, 15, 30],
   onSuccess,
 }: DialogEnvieiProps) {
+  const [contatoEscolhidoId, setContatoEscolhidoId] = useState<string>(contatoId || '');
   const [canal, setCanal] = useState<TipoRegistro>('whatsapp');
   const [texto, setTexto] = useState('');
+  const [motivoFollowup, setMotivoFollowup] = useState('');
   const [dataProxima, setDataProxima] = useState<string>('');
   const [modoEscolherData, setModoEscolherData] = useState(false);
   const [carregando, setCarregando] = useState(false);
 
+  // Define contato ativo inicial
+  useEffect(() => {
+    if (open) {
+      if (contatoId) {
+        setContatoEscolhidoId(contatoId);
+      } else if (contatos && contatos.length > 0) {
+        setContatoEscolhidoId(contatos[0]?.id || '');
+      } else {
+        setContatoEscolhidoId('');
+      }
+    }
+  }, [open, contatoId, contatos]);
+
+  const contatoAtivoId = (contatos && contatos.length > 0 ? contatoEscolhidoId : contatoId) || contatoId || '';
+
   // Mostre só as oportunidades do contato escolhido ou sem contato (contato_id nulo).
   // Nunca envie oportunidade de outro contato.
   const oportunidadesValidas = (oportunidades || []).filter(
-    (op) => !op.contato_id || (contatoId && op.contato_id === contatoId)
+    (op) => !op.contato_id || (contatoAtivoId && op.contato_id === contatoAtivoId)
   );
 
   const [oportunidadeSelecionadaId, setOportunidadeSelecionadaId] = useState<string>('');
@@ -69,18 +94,24 @@ export function DialogEnviei({
       setDataProxima(adicionarDiasSP(primeiroAtalho));
       setModoEscolherData(false);
       setTexto('');
+      setMotivoFollowup('');
       setCanal('whatsapp');
+    }
+  }, [open, atalhosDias]);
+
+  useEffect(() => {
+    if (open) {
       if (oportunidadesValidas.length > 0) {
         setOportunidadeSelecionadaId(oportunidadesValidas[0]?.id || '');
       } else {
         setOportunidadeSelecionadaId('');
       }
     }
-  }, [open, atalhosDias, contatoId]);
+  }, [open, contatoAtivoId, oportunidades]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!contatoId) {
+    if (!contatoAtivoId) {
       toast.error('Nenhum contato selecionado.');
       return;
     }
@@ -99,10 +130,11 @@ export function DialogEnviei({
     try {
       await executarEnvio({
         data: {
-          contatoId,
+          contatoId: contatoAtivoId,
           canal,
           oportunidadeId: oportunidadeFinalId || undefined,
           texto: texto.trim() || undefined,
+          motivo: motivoFollowup.trim() || undefined,
           dataProxima: dataProxima || undefined,
         },
       });
@@ -123,6 +155,8 @@ export function DialogEnviei({
     { tipo: 'ligacao', label: 'Ligação', icon: Phone },
   ];
 
+  const contatoExibicao = contatos?.find((c) => c.id === contatoAtivoId)?.nome || contatoNome;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md p-6">
@@ -130,11 +164,30 @@ export function DialogEnviei({
           <DialogTitle className="text-xl font-semibold">Registrar Envio de Apresentação</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
             {clienteNome && <span className="font-semibold text-foreground">{clienteNome}</span>}
-            {contatoNome && ` • Contato: ${contatoNome}`}
+            {(!contatos || contatos.length <= 1) && contatoExibicao && ` • Contato: ${contatoExibicao}`}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-5 pt-2">
+          {/* Seletor de Contato (se contatos tiver mais de 1 item) */}
+          {contatos && contatos.length > 1 && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
+                Contato
+              </label>
+              <select
+                value={contatoEscolhidoId}
+                onChange={(e) => setContatoEscolhidoId(e.target.value)}
+                className="w-full h-11 px-3 rounded-lg border border-input bg-card text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                {contatos.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome}{c.cargo ? ` (${c.cargo})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {/* Seletor de Oportunidade (mostrado se houver mais de uma válida) */}
           {oportunidadesValidas.length > 1 && (
             <div>
@@ -253,19 +306,33 @@ export function DialogEnviei({
             )}
           </div>
 
-          {/* Anotação opcional */}
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
-              Observações do envio (opcional)
-            </label>
-            <Textarea
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              placeholder="Ex: Enviado catálogo 2026 e apresentação por WhatsApp."
-              rows={2}
-              className="resize-none"
-            />
-          </div>
+            {/* Motivo opcional do próximo follow-up */}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
+                Motivo do próximo follow-up (opcional)
+              </label>
+              <input
+                type="text"
+                value={motivoFollowup}
+                onChange={(e) => setMotivoFollowup(e.target.value)}
+                placeholder="Ex: Perguntar da equalização do orçamento da obra de Hortolândia"
+                className="w-full h-11 px-3 rounded-lg border border-input bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+
+            {/* Anotação opcional */}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
+                Observações do envio (opcional)
+              </label>
+              <Textarea
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                placeholder="Ex: Enviado catálogo 2026 e apresentação por WhatsApp."
+                rows={2}
+                className="resize-none"
+              />
+            </div>
 
           <DialogFooter className="gap-2 sm:gap-0 pt-2">
             <Button

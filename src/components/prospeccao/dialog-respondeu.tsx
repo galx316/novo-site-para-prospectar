@@ -38,6 +38,12 @@ type SituacaoResposta =
   | 'falar_depois'
   | 'sem_interesse';
 
+export interface ContatoItem {
+  id: string;
+  nome: string;
+  cargo?: string | null;
+}
+
 export interface OportunidadeItem {
   id: string;
   contato_id?: string | null;
@@ -50,6 +56,7 @@ interface DialogRespondeuProps {
   onOpenChange: (open: boolean) => void;
   contatoId?: string;
   contatoNome?: string;
+  contatos?: ContatoItem[];
   clienteNome?: string;
   oportunidades?: OportunidadeItem[];
   onSuccess: () => void;
@@ -60,10 +67,12 @@ export function DialogRespondeu({
   onOpenChange,
   contatoId,
   contatoNome,
+  contatos,
   clienteNome,
   oportunidades = [],
   onSuccess,
 }: DialogRespondeuProps) {
+  const [contatoEscolhidoId, setContatoEscolhidoId] = useState<string>(contatoId || '');
   const [canal, setCanal] = useState<TipoRegistro>('whatsapp');
   const [situacao, setSituacao] = useState<SituacaoResposta>('tem_demanda');
   const [mesAnoNecessidade, setMesAnoNecessidade] = useState(''); // YYYY-MM
@@ -72,10 +81,24 @@ export function DialogRespondeu({
   const [texto, setTexto] = useState('');
   const [carregando, setCarregando] = useState(false);
 
+  useEffect(() => {
+    if (open) {
+      if (contatoId) {
+        setContatoEscolhidoId(contatoId);
+      } else if (contatos && contatos.length > 0) {
+        setContatoEscolhidoId(contatos[0]?.id || '');
+      } else {
+        setContatoEscolhidoId('');
+      }
+    }
+  }, [open, contatoId, contatos]);
+
+  const contatoAtivoId = (contatos && contatos.length > 0 ? contatoEscolhidoId : contatoId) || contatoId || '';
+
   // Mostre só as oportunidades do contato escolhido ou sem contato (contato_id nulo).
   // Nunca envie oportunidade de outro contato.
   const oportunidadesValidas = (oportunidades || []).filter(
-    (op) => !op.contato_id || (contatoId && op.contato_id === contatoId)
+    (op) => !op.contato_id || (contatoAtivoId && op.contato_id === contatoAtivoId)
   );
 
   const [oportunidadeSelecionadaId, setOportunidadeSelecionadaId] = useState<string>('');
@@ -90,7 +113,7 @@ export function DialogRespondeu({
         setOportunidadeSelecionadaId('');
       }
     }
-  }, [open, contatoId]);
+  }, [open, contatoAtivoId, oportunidades]);
 
   const opcoesSituacao: {
     key: SituacaoResposta;
@@ -145,7 +168,7 @@ export function DialogRespondeu({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!contatoId) {
+    if (!contatoAtivoId) {
       toast.error('Nenhum contato selecionado.');
       return;
     }
@@ -189,7 +212,7 @@ export function DialogRespondeu({
 
       await executarResposta({
         data: {
-          contatoId,
+          contatoId: contatoAtivoId,
           canal,
           situacao,
           oportunidadeId: oportunidadeFinalId || undefined,
@@ -220,6 +243,8 @@ export function DialogRespondeu({
     { tipo: 'ligacao', label: 'Ligação', icon: Phone },
   ];
 
+  const contatoExibicao = contatos?.find((c) => c.id === contatoAtivoId)?.nome || contatoNome;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg p-6 max-h-[92vh] overflow-y-auto">
@@ -227,11 +252,30 @@ export function DialogRespondeu({
           <DialogTitle className="text-xl font-semibold">Registrar Resposta do Cliente</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
             {clienteNome && <span className="font-semibold text-foreground">{clienteNome}</span>}
-            {contatoNome && ` • Contato: ${contatoNome}`}
+            {(!contatos || contatos.length <= 1) && contatoExibicao && ` • Contato: ${contatoExibicao}`}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-5 pt-2">
+          {/* Seletor de Contato (se contatos tiver mais de 1 item) */}
+          {contatos && contatos.length > 1 && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">
+                Contato
+              </label>
+              <select
+                value={contatoEscolhidoId}
+                onChange={(e) => setContatoEscolhidoId(e.target.value)}
+                className="w-full h-11 px-3 rounded-lg border border-input bg-card text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                {contatos.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome}{c.cargo ? ` (${c.cargo})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {/* Seletor de Oportunidade (mostrado se houver mais de uma válida) */}
           {oportunidadesValidas.length > 1 && (
             <div>

@@ -13,12 +13,24 @@ import {
   TIPOS_LOTE_LABELS,
   STATUS_LOTE_LABELS,
 } from '@/lib/obras.functions';
+import {
+  concluirFollowup,
+  cancelarFollowup,
+} from '@/lib/prospeccao.functions';
 import { formatarData, formatarDataHora, diasAteData, obterHojeSP } from '@/lib/date-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +46,9 @@ import { DialogFinalizarObra } from '@/components/obras/dialog-finalizar-obra';
 import { DialogNotaObra } from '@/components/obras/dialog-nota-obra';
 import { DialogNovoLote } from '@/components/obras/dialog-novo-lote';
 import { DialogEditarLote } from '@/components/obras/dialog-editar-lote';
+import { DialogEditarObra } from '@/components/obras/dialog-editar-obra';
+import { DialogNovoFollowupObra } from '@/components/obras/dialog-novo-followup-obra';
+import { DialogRemarcar } from '@/components/prospeccao/dialog-remarcar';
 import { DialogAcaoEtapaLote, type AcaoEtapaTipo } from '@/components/obras/dialog-acao-etapa-lote';
 import { DialogEnviarArquivos } from '@/components/obras/dialog-enviar-arquivos';
 import {
@@ -59,6 +74,7 @@ import {
   Factory,
   Truck,
   CheckCheck,
+  Paperclip,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -82,8 +98,17 @@ function FichaObraPage() {
   // Modais de cabeçalho
   const [modalProblema, setModalProblema] = useState(false);
   const [modalFinalizar, setModalFinalizar] = useState(false);
+  const [modalEditarObra, setModalEditarObra] = useState(false);
   const [modalNota, setModalNota] = useState(false);
   const [notaLoteId, setNotaLoteId] = useState<string | null>(null);
+
+  // Follow-ups da obra
+  const [modalNovoFollowup, setModalNovoFollowup] = useState(false);
+  const [fupRemarcando, setFupRemarcando] = useState<any | null>(null);
+
+  // Concluir Checklist com data
+  const [itemConcluindo, setItemConcluindo] = useState<any | null>(null);
+  const [dataConclusaoChecklist, setDataConclusaoChecklist] = useState<string>(obterHojeSP());
 
   // Modais de Lotes
   const [modalNovoLote, setModalNovoLote] = useState(false);
@@ -111,6 +136,8 @@ function FichaObraPage() {
   const executarEditarLote = useServerFn(editarLote);
   const executarLinkArquivo = useServerFn(linkArquivo);
   const executarExcluirArquivo = useServerFn(excluirArquivo);
+  const executarConcluirFup = useServerFn(concluirFollowup);
+  const executarCancelarFup = useServerFn(cancelarFollowup);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['obra-detalhes', obraId],
@@ -184,6 +211,45 @@ function FichaObraPage() {
       refetch();
     } catch (err: any) {
       toast.error(err.message || 'Erro ao atualizar checklist.');
+    }
+  }
+
+  async function handleConfirmarConclusaoChecklist() {
+    if (!itemConcluindo) return;
+    try {
+      await executarMarcarChecklist({
+        data: {
+          itemId: itemConcluindo.id,
+          feito: true,
+          data: dataConclusaoChecklist || obterHojeSP(),
+          obraId,
+        },
+      });
+      toast.success('Item marcado como feito.');
+      setItemConcluindo(null);
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao atualizar checklist.');
+    }
+  }
+
+  async function handleConcluirFollowupObra(id: string) {
+    try {
+      await executarConcluirFup({ data: { id } });
+      toast.success('Follow-up marcado como concluído!');
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao concluir follow-up.');
+    }
+  }
+
+  async function handleCancelarFollowupObra(id: string) {
+    try {
+      await executarCancelarFup({ data: { id } });
+      toast.success('Follow-up cancelado com sucesso.');
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao cancelar follow-up.');
     }
   }
 
@@ -355,6 +421,16 @@ function FichaObraPage() {
 
           {/* Botões de Ação no Topo */}
           <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setModalEditarObra(true)}
+              className="gap-1.5 text-xs font-semibold"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+              Editar obra
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
@@ -711,7 +787,14 @@ function FichaObraPage() {
                         <Checkbox
                           id={`check-${item.id}`}
                           checked={item.feito}
-                          onCheckedChange={() => handleToggleChecklist(item)}
+                          onCheckedChange={() => {
+                            if (!item.feito) {
+                              setItemConcluindo(item);
+                              setDataConclusaoChecklist(obterHojeSP());
+                            } else {
+                              handleToggleChecklist(item);
+                            }
+                          }}
                           className="mt-0.5"
                         />
                         <div>
@@ -791,33 +874,79 @@ function FichaObraPage() {
 
         {/* ABA: HISTÓRICO */}
         <TabsContent value="historico" className="space-y-4">
-          {/* Follow-ups Pendentes no Topo do Histórico */}
-          {followups.length > 0 && (
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2.5">
+          {/* Follow-ups Pendentes da Obra */}
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-wider">
                 <Calendar className="h-4 w-4" />
                 <span>Follow-ups Pendentes da Obra ({followups.length})</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setModalNovoFollowup(true)}
+                className="gap-1.5 text-xs font-semibold h-7 px-2.5 bg-card hover:bg-accent"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                + Follow-up
+              </Button>
+            </div>
+
+            {followups.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic py-1">
+                Nenhum follow-up pendente para esta obra.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                 {followups.map((fup: any) => (
                   <div
                     key={fup.id}
-                    className="rounded-lg border border-border bg-card p-3 text-xs space-y-1 shadow-2xs"
+                    className="rounded-lg border border-border bg-card p-3 text-xs space-y-2 shadow-2xs flex flex-col justify-between"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-foreground">{fup.motivo}</span>
-                      <Badge variant="outline" className="text-[10px]">
-                        {formatarData(fup.data)}
-                      </Badge>
+                    <div>
+                      <div className="flex items-start justify-between gap-1">
+                        <span className="font-bold text-foreground leading-tight">{fup.motivo}</span>
+                        <Badge variant="outline" className="text-[10px] shrink-0">
+                          {formatarData(fup.data)}
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Origem: {fup.origem} • Agendado para {formatarData(fup.data)}
+                      </p>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Origem: {fup.origem} • Agendado para {formatarData(fup.data)}
-                    </p>
+
+                    <div className="flex items-center gap-1.5 pt-2 border-t border-border/60">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => handleConcluirFollowupObra(fup.id)}
+                        className="h-7 px-2 text-[11px] font-semibold flex-1 gap-1"
+                      >
+                        <Check className="h-3 w-3" />
+                        Concluir
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setFupRemarcando(fup)}
+                        className="h-7 px-2 text-[11px] font-medium"
+                      >
+                        Remarcar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleCancelarFollowupObra(fup.id)}
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Registros de Histórico */}
           <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-2xs">
@@ -847,11 +976,12 @@ function FichaObraPage() {
                 {registros.map((reg: any) => {
                   const loteRef = lotes.find((l: any) => l.id === reg.lote_id);
                   const loteTipo = loteRef ? TIPOS_LOTE_LABELS[loteRef.tipo as keyof typeof TIPOS_LOTE_LABELS] || loteRef.tipo : null;
+                  const arquivosDoRegistro = arquivos.filter((a: any) => a.registro_id === reg.id);
 
                   return (
                     <div
                       key={reg.id}
-                      className="rounded-lg border border-border bg-background p-3.5 text-xs space-y-1.5"
+                      className="rounded-lg border border-border bg-background p-3.5 text-xs space-y-2"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
@@ -872,6 +1002,30 @@ function FichaObraPage() {
                       <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
                         {reg.texto}
                       </p>
+
+                      {/* Arquivos vinculados ao registro */}
+                      {arquivosDoRegistro.length > 0 && (
+                        <div className="pt-2 border-t border-border/60 flex flex-wrap gap-2">
+                          {arquivosDoRegistro.map((arq: any) => (
+                            <div
+                              key={arq.id}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/70 border border-border text-xs"
+                            >
+                              <Paperclip className="h-3 w-3 text-primary shrink-0" />
+                              <span className="font-medium max-w-[200px] truncate">{arq.nome}</span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleAbrirArquivo(arq.id)}
+                                className="h-6 px-1.5 text-[11px] text-primary hover:underline font-semibold ml-1"
+                              >
+                                Abrir
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1000,6 +1154,90 @@ function FichaObraPage() {
         loteIdInicial={notaLoteId}
         onSuccess={() => refetch()}
       />
+
+      {/* Modal Editar Obra */}
+      <DialogEditarObra
+        open={modalEditarObra}
+        onOpenChange={setModalEditarObra}
+        obra={obra}
+        onSuccess={() => refetch()}
+      />
+
+      {/* Modal Novo Follow-up da Obra */}
+      <DialogNovoFollowupObra
+        open={modalNovoFollowup}
+        onOpenChange={setModalNovoFollowup}
+        obraId={obraId}
+        lotes={lotes}
+        onSuccess={() => refetch()}
+      />
+
+      {/* Modal Remarcar Follow-up */}
+      {fupRemarcando && (
+        <DialogRemarcar
+          open={!!fupRemarcando}
+          onOpenChange={(v) => {
+            if (!v) setFupRemarcando(null);
+          }}
+          followupId={fupRemarcando.id}
+          motivo={fupRemarcando.motivo}
+          dataAtual={fupRemarcando.data}
+          onSuccess={() => {
+            setFupRemarcando(null);
+            refetch();
+          }}
+        />
+      )}
+
+      {/* Diálogo de Data para Concluir Item do Checklist */}
+      {itemConcluindo && (
+        <Dialog
+          open={!!itemConcluindo}
+          onOpenChange={(v) => {
+            if (!v) setItemConcluindo(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-xs">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold">Concluir item do checklist</DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                {itemConcluindo.item}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-2">
+              <label htmlFor="data-conclusao-chk" className="text-xs font-semibold text-foreground">
+                Data de conclusão
+              </label>
+              <Input
+                id="data-conclusao-chk"
+                type="date"
+                value={dataConclusaoChecklist}
+                onChange={(e) => setDataConclusaoChecklist(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setItemConcluindo(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleConfirmarConclusaoChecklist}
+                className="gap-1 font-semibold"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Modais de Lotes */}
       <DialogNovoLote
