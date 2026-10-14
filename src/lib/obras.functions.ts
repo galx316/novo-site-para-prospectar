@@ -1532,3 +1532,130 @@ export const excluirEntrega = createServerFn({ method: 'POST' })
     return { success: true };
   });
 
+/**
+ * 16. Importar cronograma de entregas no lote.
+ */
+export const importarEntregas = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    loteId: string;
+    entregas: Array<{
+      quantidade?: number | null | undefined;
+      previsao?: string | null | undefined;
+      observacao?: string | null | undefined;
+    }>;
+    substituirPendentes: boolean;
+    quantidadeLote?: number | null | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    if (!data.loteId) throw new Error('ID do lote não informado.');
+    if (!Array.isArray(data.entregas) || data.entregas.length === 0) {
+      throw new Error('Nenhuma entrega para importar.');
+    }
+
+    // 1. Obter a obra para cliente_id
+    const { data: obra, error: obraErr } = await supabase
+      .from('obras')
+      .select('id, cliente_id')
+      .eq('id', data.obraId)
+      .single();
+    if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
+
+    // 2. Confira que o lote é desta obra
+    const { data: lote, error: loteErr } = await supabase
+      .from('lotes')
+      .select('id, obra_id, quantidade')
+      .eq('id', data.loteId)
+      .eq('obra_id', data.obraId)
+      .single();
+    if (loteErr || !lote) throw new Error(loteErr?.message || 'Lote não encontrado nesta obra.');
+
+    // 3. Se vier quantidadeLote e o lote estiver sem quantidade: grave lotes.quantidade
+    let qtdLoteAtual = lote.quantidade;
+    if (data.quantidadeLote != null && data.quantidadeLote > 0 && lote.quantidade == null) {
+      const { error: updLoteErr } = await supabase
+        .from('lotes')
+        .update({ quantidade: data.quantidadeLote })
+        .eq('id', lote.id);
+      if (updLoteErr) throw new Error(updLoteErr.message || 'Erro ao atualizar quantidade do lote.');
+      qtdLoteAtual = data.quantidadeLote;
+    }
+
+    // 4. Se substituirPendentes: apague as entregas do lote com entregue_em vazio (null)
+    if (data.substituirPendentes) {
+      const { error: delErr } = await supabase
+        .from('entregas')
+        .delete()
+        .eq('lote_id', data.loteId)
+        .is('entregue_em', null);
+      if (delErr) throw new Error(delErr.message || 'Erro ao remover entregas pendentes.');
+    }
+
+    // 5. Buscar entregas que restaram para numerar novas a partir do maior número + 1
+    const { data: entregasRestantes, error: entErr } = await supabase
+      .from('entregas')
+      .select('id, numero, quantidade, entregue_em')
+      .eq('lote_id', data.loteId)
+      .order('numero', { ascending: true });
+    if (entErr) throw new Error(entErr.message || 'Erro ao consultar entregas do lote.');
+
+    const maiorNumero = (entregasRestantes || []).reduce((max, e) => Math.max(max, e.numero), 0);
+
+    // 6. Regra de soma: se o lote tiver quantidade, a soma de todas as entregas não pode passar.
+    // Mensagem: "A soma das entregas passa a quantidade do lote."
+    const pecasRestantes = (entregasRestantes || []).reduce((sum, e) => sum + (e.quantidade || 0), 0);
+    const pecasNovas = data.entregas.reduce((sum, e) => sum + (e.quantidade || 0), 0);
+    const totalPecasFinal = pecasRestantes + pecasNovas;
+
+    if (qtdLoteAtual != null && totalPecasFinal > qtdLoteAtual) {
+      throw new Error('A soma das entregas passa a quantidade do lote.');
+    }
+
+    // 7. Insira as entregas (previsao = data combinada; data_confirmada = null)
+    let proxNumero = maiorNumero + 1;
+    const registrosParaInserir = data.entregas.map((e) => ({
+      lote_id: data.loteId,
+      numero: proxNumero++,
+      quantidade: e.quantidade != null ? e.quantidade : null,
+      previsao: e.previsao ? e.previsao.slice(0, 10) : null,
+      data_confirmada: null,
+      observacao: e.observacao?.trim() || null,
+      entregue_em: null,
+      recebimento_confirmado: false,
+      responsavel_recebimento: null,
+    }));
+
+    const { error: insErr } = await supabase
+      .from('entregas')
+      .insert(registrosParaInserir);
+    if (insErr) throw new Error(insErr.message || 'Erro ao inserir entregas.');
+
+    // 8. Registro tipo 'nota' (obra_id, lote_id, cliente_id): "Cronograma importado: <n> entrega(s), <total> peças"
+    const hoje = obterHojeSP();
+    const textoNota = `Cronograma importado: ${data.entregas.length} entrega(s), ${pecasNovas} peças`;
+    const { error: notaErr } = await supabase
+      .from('registros')
+      .insert({
+        obra_id: data.obraId,
+        lote_id: data.loteId,
+        cliente_id: obra.cliente_id,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: textoNota,
+        data: hoje,
+      });
+    if (notaErr) throw new Error(notaErr.message || 'Erro ao criar registro de nota.');
+
+    return {
+      success: true,
+      importadas: data.entregas.length,
+      pecasNovas,
+    };
+  });
+
+

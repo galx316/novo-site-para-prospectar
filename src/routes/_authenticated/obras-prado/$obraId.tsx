@@ -56,6 +56,7 @@ import { DialogAcaoEtapaLote, type AcaoEtapaTipo } from '@/components/obras/dial
 import { DialogEnviarArquivos } from '@/components/obras/dialog-enviar-arquivos';
 import { DialogFormEntrega } from '@/components/obras/dialog-form-entrega';
 import { DialogRegistrarEntregaParcial } from '@/components/obras/dialog-registrar-entrega-parcial';
+import { DialogImportarCronograma } from '@/components/obras/dialog-importar-cronograma';
 import {
   Building2,
   ArrowLeft,
@@ -139,6 +140,8 @@ function FichaObraPage() {
   const [entregaRegistrando, setEntregaRegistrando] = useState<Entrega | null>(null);
   const [entregaParaExcluir, setEntregaParaExcluir] = useState<Entrega | null>(null);
   const [excluindoEntrega, setExcluindoEntrega] = useState(false);
+  const [modalImportarCronograma, setModalImportarCronograma] = useState(false);
+  const [loteImportandoCronograma, setLoteImportandoCronograma] = useState<any | null>(null);
 
   // Edição de nota em item do checklist
   const [editandoNotaItemId, setEditandoNotaItemId] = useState<string | null>(null);
@@ -363,6 +366,11 @@ function FichaObraPage() {
     setLoteEntrega(lote);
     setEntregaEditando(null);
     setModalFormEntrega(true);
+  }
+
+  function abrirImportarCronograma(lote: any) {
+    setLoteImportandoCronograma(lote);
+    setModalImportarCronograma(true);
   }
 
   function abrirEditarEntrega(lote: any, entrega: Entrega) {
@@ -870,16 +878,29 @@ function FichaObraPage() {
                           )}
                         </div>
 
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => abrirNovaEntrega(lote)}
-                          className="h-7 text-xs font-semibold gap-1 self-start sm:self-auto"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Entrega
-                        </Button>
+                        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => abrirImportarCronograma(lote)}
+                            className="h-7 text-xs font-semibold gap-1 text-primary hover:text-primary"
+                          >
+                            <UploadCloud className="h-3.5 w-3.5" />
+                            Importar cronograma
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => abrirNovaEntrega(lote)}
+                            className="h-7 text-xs font-semibold gap-1"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Entrega
+                          </Button>
+                        </div>
                       </div>
 
                       {totalEntregas === 0 ? (
@@ -1717,6 +1738,15 @@ function FichaObraPage() {
           if (!open) setArquivoVisualizando(null);
         }}
         arquivo={arquivoVisualizando}
+      />
+
+      {/* Modal Importar Cronograma Prado */}
+      <DialogImportarCronograma
+        open={modalImportarCronograma}
+        onOpenChange={setModalImportarCronograma}
+        obraId={obraId}
+        lote={loteImportandoCronograma}
+        onSuccess={() => refetch()}
       />
     </main>
   );
