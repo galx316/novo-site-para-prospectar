@@ -76,6 +76,7 @@ export function DialogEditarLote({
   onSuccess,
 }: DialogEditarLoteProps) {
   const [tipo, setTipo] = useState<TipoLote>('contramarco');
+  const [semMedicao, setSemMedicao] = useState(false);
   const [descricao, setDescricao] = useState('');
   const [quantidade, setQuantidade] = useState<string>('');
   const [cadastroCompleto, setCadastroCompleto] = useState(false);
@@ -122,6 +123,7 @@ export function DialogEditarLote({
   useEffect(() => {
     if (lote && open) {
       setTipo(lote.tipo || 'contramarco');
+      setSemMedicao(!!lote.sem_medicao);
       setDescricao(lote.descricao || '');
       setQuantidade(lote.quantidade ? String(lote.quantidade) : '');
       setCadastroCompleto(!!lote.cadastro_completo);
@@ -136,7 +138,7 @@ export function DialogEditarLote({
       setConfirmarExcluir(false);
       setArquivosMedicao([]);
 
-      if (prev) {
+      if (prev && !lote.sem_medicao) {
         setCriarLembrete(true);
         atualizarSugestaoLembrete(prev);
       } else {
@@ -150,14 +152,14 @@ export function DialogEditarLote({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (medidoEm && !cadastroCompleto) {
+    if (!semMedicao && medidoEm && !cadastroCompleto) {
       toast.error('Complete o cadastro do lote antes da medição.');
       return;
     }
 
     const temEntregasParciais = Array.isArray(lote.entregas) && lote.entregas.length > 0;
 
-    if (!temEntregasParciais && entregueEm && !medidoEm) {
+    if (!semMedicao && !temEntregasParciais && entregueEm && !medidoEm) {
       toast.error('Não é possível registrar entrega sem o lote ter sido medido.');
       return;
     }
@@ -173,8 +175,9 @@ export function DialogEditarLote({
         descricao: descricao.trim() || null,
         quantidade: isNaN(qtdNum as number) ? null : qtdNum,
         cadastro_completo: cadastroCompleto,
-        previsao_medicao: previsaoMedicao || null,
-        medido_em: medidoEm || null,
+        sem_medicao: semMedicao,
+        previsao_medicao: semMedicao ? null : (previsaoMedicao || null),
+        medido_em: semMedicao ? (medidoEm || lote.medido_em || null) : (medidoEm || null),
       };
 
       if (!temEntregasParciais) {
@@ -186,7 +189,7 @@ export function DialogEditarLote({
 
       // Só envia status se for um dos status manuais ('pcp', 'em_producao', 'produzido')
       if (['pcp', 'em_producao', 'produzido'].includes(status) && status !== lote.status) {
-        if (!medidoEm) {
+        if (!semMedicao && !medidoEm && !lote.medido_em) {
           toast.error('O lote precisa ter medição registrada para alterar status de produção.');
           setSalvando(false);
           return;
@@ -345,12 +348,30 @@ export function DialogEditarLote({
             </div>
           </div>
 
+          {/* Não precisa de medição */}
+          <div className="rounded-lg border border-border bg-accent/30 p-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold text-foreground">Não precisa de medição</p>
+              <p className="text-[11px] text-muted-foreground">
+                Lote sem medição na obra (ex.: apto modelo, reposição).
+              </p>
+            </div>
+            <Checkbox
+              id="edit-sem-medicao"
+              checked={semMedicao}
+              onCheckedChange={(checked) => setSemMedicao(!!checked)}
+              disabled={salvando || excluindo}
+            />
+          </div>
+
           {/* Cadastro Completo */}
           <div className="rounded-lg border border-border bg-accent/30 p-3 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-bold text-foreground">Cadastro Completo</p>
               <p className="text-[11px] text-muted-foreground">
-                Obrigatório estar marcado para habilitar a medição do lote.
+                {semMedicao
+                  ? 'Avança o lote diretamente para PCP após salvar.'
+                  : 'Obrigatório estar marcado para habilitar a medição do lote.'}
               </p>
             </div>
             <Checkbox
@@ -361,109 +382,111 @@ export function DialogEditarLote({
             />
           </div>
 
-          {/* Medição */}
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label htmlFor="edit-prev-med" className="text-xs font-semibold text-foreground">
-                  Previsão de Medição
-                </label>
-                <Input
-                  id="edit-prev-med"
-                  type="date"
-                  value={previsaoMedicao}
-                  onChange={(e) => {
-                    setPrevisaoMedicao(e.target.value);
-                    if (e.target.value) {
-                      setCriarLembrete(true);
-                      atualizarSugestaoLembrete(e.target.value);
-                    }
-                  }}
-                  disabled={salvando || excluindo}
-                  className="h-9"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label htmlFor="edit-med-em" className="text-xs font-semibold text-foreground">
-                  Medido em (Data Efetiva)
-                </label>
-                <Input
-                  id="edit-med-em"
-                  type="date"
-                  value={medidoEm}
-                  onChange={(e) => setMedidoEm(e.target.value)}
-                  disabled={salvando || excluindo}
-                  className="h-9"
-                />
-              </div>
-            </div>
-
-            {/* Caixa de Lembrete ao definir previsão de medição */}
-            {previsaoMedicao && (
-              <div className="rounded-lg border border-border bg-accent/20 p-3 space-y-2.5">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="edit-chk-lembrete"
-                    checked={criarLembrete}
-                    onCheckedChange={(c) => setCriarLembrete(!!c)}
-                    disabled={salvando || excluindo}
-                  />
-                  <label
-                    htmlFor="edit-chk-lembrete"
-                    className="text-xs font-semibold text-foreground flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Bell className="h-3.5 w-3.5 text-primary" />
-                    Criar lembrete de medição
+          {/* Medição (escondida se semMedicao for true) */}
+          {!semMedicao && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-prev-med" className="text-xs font-semibold text-foreground">
+                    Previsão de Medição
                   </label>
+                  <Input
+                    id="edit-prev-med"
+                    type="date"
+                    value={previsaoMedicao}
+                    onChange={(e) => {
+                      setPrevisaoMedicao(e.target.value);
+                      if (e.target.value) {
+                        setCriarLembrete(true);
+                        atualizarSugestaoLembrete(e.target.value);
+                      }
+                    }}
+                    disabled={salvando || excluindo}
+                    className="h-9"
+                  />
                 </div>
 
-                {criarLembrete && (
-                  <div className="space-y-2 pl-6 pt-1">
-                    <div className="space-y-1">
-                      <label htmlFor="edit-data-lembrete" className="text-[11px] font-medium text-muted-foreground">
-                        Data do lembrete
-                      </label>
-                      <Input
-                        id="edit-data-lembrete"
-                        type="date"
-                        value={dataLembrete}
-                        onChange={(e) => setDataLembrete(e.target.value)}
-                        disabled={salvando || excluindo}
-                        className="h-8 text-xs"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label htmlFor="edit-motivo-lembrete" className="text-[11px] font-medium text-muted-foreground">
-                        Motivo do lembrete
-                      </label>
-                      <Input
-                        id="edit-motivo-lembrete"
-                        value={motivoLembrete}
-                        onChange={(e) => setMotivoLembrete(e.target.value)}
-                        disabled={salvando || excluindo}
-                        placeholder="Motivo do follow-up"
-                        className="h-8 text-xs"
-                      />
-                    </div>
-                  </div>
-                )}
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-med-em" className="text-xs font-semibold text-foreground">
+                    Medido em (Data Efetiva)
+                  </label>
+                  <Input
+                    id="edit-med-em"
+                    type="date"
+                    value={medidoEm}
+                    onChange={(e) => setMedidoEm(e.target.value)}
+                    disabled={salvando || excluindo}
+                    className="h-9"
+                  />
+                </div>
               </div>
-            )}
 
-            {/* Anexar arquivos da medição */}
-            <CampoAnexosMedicao
-              arquivos={arquivosMedicao}
-              onChange={setArquivosMedicao}
-              disabled={salvando || excluindo}
-            />
-          </div>
+              {/* Caixa de Lembrete ao definir previsão de medição */}
+              {previsaoMedicao && (
+                <div className="rounded-lg border border-border bg-accent/20 p-3 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="edit-chk-lembrete"
+                      checked={criarLembrete}
+                      onCheckedChange={(c) => setCriarLembrete(!!c)}
+                      disabled={salvando || excluindo}
+                    />
+                    <label
+                      htmlFor="edit-chk-lembrete"
+                      className="text-xs font-semibold text-foreground flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Bell className="h-3.5 w-3.5 text-primary" />
+                      Criar lembrete de medição
+                    </label>
+                  </div>
+
+                  {criarLembrete && (
+                    <div className="space-y-2 pl-6 pt-1">
+                      <div className="space-y-1">
+                        <label htmlFor="edit-data-lembrete" className="text-[11px] font-medium text-muted-foreground">
+                          Data do lembrete
+                        </label>
+                        <Input
+                          id="edit-data-lembrete"
+                          type="date"
+                          value={dataLembrete}
+                          onChange={(e) => setDataLembrete(e.target.value)}
+                          disabled={salvando || excluindo}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label htmlFor="edit-motivo-lembrete" className="text-[11px] font-medium text-muted-foreground">
+                          Motivo do lembrete
+                        </label>
+                        <Input
+                          id="edit-motivo-lembrete"
+                          value={motivoLembrete}
+                          onChange={(e) => setMotivoLembrete(e.target.value)}
+                          disabled={salvando || excluindo}
+                          placeholder="Motivo do follow-up"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Anexar arquivos da medição */}
+              <CampoAnexosMedicao
+                arquivos={arquivosMedicao}
+                onChange={setArquivosMedicao}
+                disabled={salvando || excluindo}
+              />
+            </div>
+          )}
 
           {/* Status Manual de Produção */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-foreground">
-              Status de Produção (após medição)
+              Status de Produção {semMedicao ? '' : '(após medição)'}
             </label>
             <Select value={status} onValueChange={setStatus} disabled={salvando || excluindo}>
               <SelectTrigger className="h-9">
@@ -479,26 +502,30 @@ export function DialogEditarLote({
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              Status manual só aceita PCP, Em produção ou Produzido com medição registrada.
+              {semMedicao
+                ? 'Status manual aceita PCP, Em produção ou Produzido.'
+                : 'Status manual só aceita PCP, Em produção ou Produzido com medição registrada.'}
             </p>
           </div>
 
           {/* Prazo Prado (referência) */}
-          <div className="space-y-1.5 pt-1 border-t border-border/60">
-            <label className="text-xs font-semibold text-foreground">
-              Prazo Prado (referência)
-            </label>
-            <Input
-              type="text"
-              value={lote.previsao_entrega ? `${formatarData(lote.previsao_entrega)}${lote.prazo_dias ? ` (${lote.prazo_dias} dias)` : ''}` : 'Calculado após medição do lote'}
-              disabled
-              readOnly
-              className="h-9 bg-muted/50 cursor-not-allowed text-xs text-muted-foreground font-medium"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Prazo contratual padrão calculado a partir da medição do lote.
-            </p>
-          </div>
+          {!semMedicao && (
+            <div className="space-y-1.5 pt-1 border-t border-border/60">
+              <label className="text-xs font-semibold text-foreground">
+                Prazo Prado (referência)
+              </label>
+              <Input
+                type="text"
+                value={lote.previsao_entrega ? `${formatarData(lote.previsao_entrega)}${lote.prazo_dias ? ` (${lote.prazo_dias} dias)` : ''}` : 'Calculado após medição do lote'}
+                disabled
+                readOnly
+                className="h-9 bg-muted/50 cursor-not-allowed text-xs text-muted-foreground font-medium"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Prazo contratual padrão calculado a partir da medição do lote.
+              </p>
+            </div>
+          )}
 
           {/* Entrega */}
           {Array.isArray(lote.entregas) && lote.entregas.length > 0 ? (

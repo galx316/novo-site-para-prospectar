@@ -122,7 +122,7 @@ export async function uploadArquivosMedicao({
 }: {
   arquivos: File[];
   obraId: string;
-  loteId: string;
+  loteId?: string | null;
   registroId?: string;
   registrarArquivoFn: any;
 }): Promise<number> {
@@ -149,7 +149,7 @@ export async function uploadArquivosMedicao({
       await registrarArquivoFn({
         data: {
           obraId,
-          loteId,
+          loteId: loteId || undefined,
           registroId: registroId || undefined,
           nome: file.name,
           mime: file.type || undefined,

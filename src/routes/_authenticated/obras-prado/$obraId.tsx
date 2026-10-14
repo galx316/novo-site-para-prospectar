@@ -51,12 +51,15 @@ import { DialogNovoLote } from '@/components/obras/dialog-novo-lote';
 import { DialogEditarLote } from '@/components/obras/dialog-editar-lote';
 import { DialogEditarObra } from '@/components/obras/dialog-editar-obra';
 import { DialogNovoFollowupObra, type ModeloFollowup } from '@/components/obras/dialog-novo-followup-obra';
+import { DialogAgendarVisita } from '@/components/obras/dialog-agendar-visita';
+import { DialogConcluirVisita, type ParametrosReposicaoAposVisita } from '@/components/obras/dialog-concluir-visita';
 import { DialogRemarcar } from '@/components/prospeccao/dialog-remarcar';
 import { DialogAcaoEtapaLote, type AcaoEtapaTipo } from '@/components/obras/dialog-acao-etapa-lote';
 import { DialogEnviarArquivos } from '@/components/obras/dialog-enviar-arquivos';
 import { DialogFormEntrega } from '@/components/obras/dialog-form-entrega';
 import { DialogRegistrarEntregaParcial } from '@/components/obras/dialog-registrar-entrega-parcial';
 import { DialogImportarCronograma } from '@/components/obras/dialog-importar-cronograma';
+import { CATEGORIAS_VISITA_LABELS, type CategoriaFollowup } from '@/lib/obras.functions';
 import {
   Building2,
   ArrowLeft,
@@ -81,6 +84,7 @@ import {
   Truck,
   CheckCheck,
   Paperclip,
+  Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -108,10 +112,12 @@ function FichaObraPage() {
   const [modalNota, setModalNota] = useState(false);
   const [notaLoteId, setNotaLoteId] = useState<string | null>(null);
 
-  // Follow-ups da obra
+  // Follow-ups e Visitas da obra
   const [modalNovoFollowup, setModalNovoFollowup] = useState(false);
   const [modeloFollowup, setModeloFollowup] = useState<ModeloFollowup>('livre');
   const [fupRemarcando, setFupRemarcando] = useState<any | null>(null);
+  const [modalAgendarVisita, setModalAgendarVisita] = useState(false);
+  const [visitaConcluindo, setVisitaConcluindo] = useState<any | null>(null);
 
   // Concluir Checklist com data
   const [itemConcluindo, setItemConcluindo] = useState<any | null>(null);
@@ -119,6 +125,7 @@ function FichaObraPage() {
 
   // Modais de Lotes
   const [modalNovoLote, setModalNovoLote] = useState(false);
+  const [paramsNovoLote, setParamsNovoLote] = useState<{ tipo?: TipoLote; semMedicao?: boolean; descricao?: string }>({});
   const [modalEditarLote, setModalEditarLote] = useState(false);
   const [loteEditando, setLoteEditando] = useState<any | null>(null);
 
@@ -203,13 +210,28 @@ function FichaObraPage() {
   );
 
   const lotesMedidos = lotes
-    .filter((l: any) => !!l.medido_em)
+    .filter((l: any) => !l.sem_medicao && !!l.medido_em)
     .sort((a: any, b: any) => String(a.medido_em).localeCompare(String(b.medido_em)));
   const lotesPrevistos = lotes
-    .filter((l: any) => !l.medido_em && !!l.previsao_medicao)
+    .filter((l: any) => !l.sem_medicao && !l.medido_em && !!l.previsao_medicao)
     .sort((a: any, b: any) => String(a.previsao_medicao).localeCompare(String(b.previsao_medicao)));
   const painelMedicoes = [...lotesMedidos, ...lotesPrevistos];
-  const lotesSemMedicao = lotes.filter((l: any) => !l.medido_em && !l.previsao_medicao);
+  const lotesSemMedicao = lotes.filter((l: any) => !l.sem_medicao && !l.medido_em && !l.previsao_medicao);
+
+  // Visitas e serviços (categorias: visita_tecnica, regulagem, treinamento, outro)
+  const CATEGORIAS_VISITAS_SET = new Set(['visita_tecnica', 'regulagem', 'treinamento', 'outro']);
+  const todasVisitas = followups.filter((f: any) => f.categoria && CATEGORIAS_VISITAS_SET.has(f.categoria));
+  const visitasPendentes = todasVisitas
+    .filter((v: any) => v.status === 'pendente')
+    .sort((a: any, b: any) => String(a.data).localeCompare(String(b.data)));
+  const visitasConcluidas = todasVisitas
+    .filter((v: any) => v.status === 'concluido')
+    .sort((a: any, b: any) => String(b.data).localeCompare(String(a.data)));
+
+  // Follow-ups gerais (exclui visitas/serviços)
+  const followupsGeraisPendentes = followups.filter(
+    (f: any) => f.status === 'pendente' && (!f.categoria || !CATEGORIAS_VISITAS_SET.has(f.categoria))
+  );
 
   async function handleResolverProblema() {
     try {
@@ -752,6 +774,166 @@ function FichaObraPage() {
             </div>
           )}
 
+          {/* Seção: Visitas e Serviços na Obra */}
+          <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-2xs space-y-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                  <Wrench className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">Visitas e Serviços na Obra</h3>
+                  <p className="text-[11px] text-muted-foreground">
+                    Vistorias técnicas, regulagens, treinamentos de instalação e outros atendimentos
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                {visitasPendentes.length > 0 && (
+                  <Badge variant="outline" className="text-xs font-semibold">
+                    {visitasPendentes.length} pendente{visitasPendentes.length > 1 ? 's' : ''}
+                  </Badge>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => setModalAgendarVisita(true)}
+                  className="gap-1.5 text-xs font-semibold h-7 px-2.5"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  + Agendar
+                </Button>
+              </div>
+            </div>
+
+            {visitasPendentes.length === 0 && visitasConcluidas.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic py-1">
+                Nenhuma visita ou serviço agendado. Clique em + Agendar.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {/* Próximas primeiro */}
+                {visitasPendentes.length > 0 && (
+                  <div className="space-y-2">
+                    {visitasPendentes.map((visita: any) => {
+                      const cat = (visita.categoria as CategoriaFollowup) || 'outro';
+                      const tipoLabel = CATEGORIAS_VISITA_LABELS[cat] || 'Visita';
+                      const loteRel = lotes.find((l: any) => l.id === visita.lote_id);
+                      const tipoLoteRel = loteRel ? TIPOS_LOTE_LABELS[loteRel.tipo as TipoLote] || loteRel.tipo : null;
+                      const desc = visita.motivo.includes(': ')
+                        ? visita.motivo.slice(visita.motivo.indexOf(': ') + 2)
+                        : visita.motivo;
+                      const dataLimpa = visita.data ? visita.data.slice(0, 10) : '';
+                      const isAtrasado = dataLimpa && dataLimpa < hoje;
+
+                      return (
+                        <div
+                          key={visita.id}
+                          className="p-3 rounded-lg border border-border/80 bg-background flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-2xs"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge
+                                variant={isAtrasado ? 'destructive' : 'secondary'}
+                                className="font-bold text-[11px] shrink-0"
+                              >
+                                {formatarData(visita.data)}
+                              </Badge>
+                              <Badge variant="outline" className="text-[11px] font-semibold text-primary shrink-0">
+                                {tipoLabel}
+                              </Badge>
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <span className="font-medium text-foreground">{desc}</span>
+                              {loteRel && (
+                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">
+                                  Lote: {tipoLoteRel}{loteRel.descricao ? ` (${loteRel.descricao})` : ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0 self-end md:self-auto">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={() => setVisitaConcluindo(visita)}
+                              className="h-7 px-2.5 text-xs font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                              <Check className="h-3 w-3" />
+                              Concluir
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setFupRemarcando(visita)}
+                              className="h-7 px-2.5 text-xs font-medium"
+                            >
+                              Remarcar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleCancelarFollowupObra(visita.id)}
+                              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                            >
+                              Cancelar
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Concluídas (cinza) */}
+                {visitasConcluidas.length > 0 && (
+                  <div className="pt-2 border-t border-border/40 space-y-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Concluídas ({visitasConcluidas.length})
+                    </p>
+                    <div className="space-y-1.5">
+                      {visitasConcluidas.map((visita: any) => {
+                        const cat = (visita.categoria as CategoriaFollowup) || 'outro';
+                        const tipoLabel = CATEGORIAS_VISITA_LABELS[cat] || 'Visita';
+                        const loteRel = lotes.find((l: any) => l.id === visita.lote_id);
+                        const tipoLoteRel = loteRel ? TIPOS_LOTE_LABELS[loteRel.tipo as TipoLote] || loteRel.tipo : null;
+                        const desc = visita.motivo.includes(': ')
+                          ? visita.motivo.slice(visita.motivo.indexOf(': ') + 2)
+                          : visita.motivo;
+
+                        return (
+                          <div
+                            key={visita.id}
+                            className="p-2.5 rounded-lg border border-border/40 bg-muted/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-muted-foreground opacity-80"
+                          >
+                            <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+                              <span className="font-medium text-muted-foreground">{formatarData(visita.data)}</span>
+                              <Badge variant="outline" className="text-[10px] py-0 border-border/60 text-muted-foreground">
+                                {tipoLabel}
+                              </Badge>
+                              <span className="truncate">{desc}</span>
+                              {loteRel && (
+                                <span className="text-[10px] text-muted-foreground/80 italic">
+                                  ({tipoLoteRel})
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 shrink-0">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Concluída
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {lotes.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center space-y-3">
               <Package className="h-8 w-8 mx-auto text-muted-foreground" />
@@ -809,7 +991,9 @@ function FichaObraPage() {
 
                 // Linha 2: "Medido em dd/mm/aaaa" (ou "Medição prevista dd/mm/aaaa" ou "Sem medição") + quantidade.
                 let textoMedicao = 'Sem medição';
-                if (lote.medido_em) {
+                if (lote.sem_medicao) {
+                  textoMedicao = 'Sem medição';
+                } else if (lote.medido_em) {
                   textoMedicao = `Medido em ${formatarData(lote.medido_em)}`;
                 } else if (lote.previsao_medicao) {
                   textoMedicao = `Medição prevista ${formatarData(lote.previsao_medicao)}`;
@@ -846,22 +1030,29 @@ function FichaObraPage() {
                     </div>
 
                     {/* Linha 3: "Prazo Prado: dd/mm/aaaa (<prazo_dias> dias)" e férias */}
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-                      <span>
-                        Prazo Prado: {formatarData(lote.previsao_entrega)}
-                        {lote.prazo_dias ? ` (${lote.prazo_dias} dias)` : ''}
-                      </span>
-                      {lote.acrescimo_ferias_dias > 0 && (
-                        <span className="text-amber-600 dark:text-amber-400 font-medium">
-                          +{lote.acrescimo_ferias_dias} dias férias
+                    {!lote.sem_medicao && (
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                        <span>
+                          Prazo Prado: {formatarData(lote.previsao_entrega)}
+                          {lote.prazo_dias ? ` (${lote.prazo_dias} dias)` : ''}
                         </span>
-                      )}
-                      {!temDataCombinada && !isEntregue && (
-                        <span className="text-muted-foreground/70 italic">
-                          • Sem data combinada
-                        </span>
-                      )}
-                    </div>
+                        {lote.acrescimo_ferias_dias > 0 && (
+                          <span className="text-amber-600 dark:text-amber-400 font-medium">
+                            +{lote.acrescimo_ferias_dias} dias férias
+                          </span>
+                        )}
+                        {!temDataCombinada && !isEntregue && (
+                          <span className="text-muted-foreground/70 italic">
+                            • Sem data combinada
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {lote.sem_medicao && !temDataCombinada && !isEntregue && (
+                      <div className="text-xs text-muted-foreground/70 italic">
+                        Sem data combinada
+                      </div>
+                    )}
 
                     {/* Bloco Entregas */}
                     <div className="rounded-lg border border-border bg-accent/15 p-3.5 space-y-3">
@@ -1022,77 +1213,123 @@ function FichaObraPage() {
                     {/* Rodapé: Um botão de ação principal e o botão "Editar". Nada mais. */}
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/50">
                       <div>
-                        {lote.status === 'aguardando_cadastro' && (
-                          <Button
-                            size="sm"
-                            onClick={() => handleCadastroCompletoDireto(lote.id)}
-                            className="h-8 text-xs font-semibold gap-1.5"
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Cadastro completo
-                          </Button>
-                        )}
+                        {lote.sem_medicao ? (
+                          <>
+                            {lote.status === 'aguardando_cadastro' && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleCadastroCompletoDireto(lote.id)}
+                                className="h-8 text-xs font-semibold gap-1.5"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Cadastro completo
+                              </Button>
+                            )}
 
-                        {lote.status === 'aguardando_medicao' && (
-                          <Button
-                            size="sm"
-                            onClick={() => abrirAcaoEtapa('agendar_medicao', lote)}
-                            className="h-8 text-xs font-semibold gap-1.5"
-                          >
-                            <Calendar className="h-3.5 w-3.5" />
-                            Agendar medição
-                          </Button>
-                        )}
+                            {lote.status === 'entregue' && (
+                              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                                <CheckCircle2 className="h-4 w-4" />
+                                Lote Entregue
+                              </span>
+                            )}
 
-                        {lote.status === 'medicao_agendada' && (
-                          <Button
-                            size="sm"
-                            onClick={() => abrirAcaoEtapa('registrar_medicao', lote)}
-                            className="h-8 text-xs font-semibold gap-1.5"
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                            Registrar medição
-                          </Button>
-                        )}
+                            {lote.status !== 'aguardando_cadastro' && lote.status !== 'entregue' && (
+                              totalEntregas > 0 && proximaEntregaPendente ? (
+                                <Button
+                                  size="sm"
+                                  onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
+                                  className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                >
+                                  <Truck className="h-3.5 w-3.5" />
+                                  Registrar próxima entrega
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={() => abrirNovaEntrega(lote)}
+                                  className="h-8 text-xs font-semibold gap-1.5"
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  + Entrega
+                                </Button>
+                              )
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {lote.status === 'aguardando_cadastro' && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleCadastroCompletoDireto(lote.id)}
+                                className="h-8 text-xs font-semibold gap-1.5"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Cadastro completo
+                              </Button>
+                            )}
 
-                        {['medido', 'pcp', 'em_producao'].includes(lote.status) && (
-                          <Button
-                            size="sm"
-                            onClick={() => abrirAcaoEtapa('atualizar_producao', lote)}
-                            className="h-8 text-xs font-semibold gap-1.5"
-                          >
-                            <Factory className="h-3.5 w-3.5" />
-                            Atualizar produção
-                          </Button>
-                        )}
+                            {lote.status === 'aguardando_medicao' && (
+                              <Button
+                                size="sm"
+                                onClick={() => abrirAcaoEtapa('agendar_medicao', lote)}
+                                className="h-8 text-xs font-semibold gap-1.5"
+                              >
+                                <Calendar className="h-3.5 w-3.5" />
+                                Agendar medição
+                              </Button>
+                            )}
 
-                        {lote.status === 'produzido' && (
-                          totalEntregas > 0 && proximaEntregaPendente ? (
-                            <Button
-                              size="sm"
-                              onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
-                              className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                            >
-                              <Truck className="h-3.5 w-3.5" />
-                              Registrar entrega
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              onClick={() => abrirAcaoEtapa('registrar_entrega', lote)}
-                              className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                            >
-                              <Truck className="h-3.5 w-3.5" />
-                              Registrar entrega
-                            </Button>
-                          )
-                        )}
+                            {lote.status === 'medicao_agendada' && (
+                              <Button
+                                size="sm"
+                                onClick={() => abrirAcaoEtapa('registrar_medicao', lote)}
+                                className="h-8 text-xs font-semibold gap-1.5"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                Registrar medição
+                              </Button>
+                            )}
 
-                        {lote.status === 'entregue' && (
-                          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                            <CheckCircle2 className="h-4 w-4" />
-                            Lote Entregue
-                          </span>
+                            {['medido', 'pcp', 'em_producao'].includes(lote.status) && (
+                              <Button
+                                size="sm"
+                                onClick={() => abrirAcaoEtapa('atualizar_producao', lote)}
+                                className="h-8 text-xs font-semibold gap-1.5"
+                              >
+                                <Factory className="h-3.5 w-3.5" />
+                                Atualizar produção
+                              </Button>
+                            )}
+
+                            {lote.status === 'produzido' && (
+                              totalEntregas > 0 && proximaEntregaPendente ? (
+                                <Button
+                                  size="sm"
+                                  onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
+                                  className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                >
+                                  <Truck className="h-3.5 w-3.5" />
+                                  Registrar entrega
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={() => abrirAcaoEtapa('registrar_entrega', lote)}
+                                  className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                >
+                                  <Truck className="h-3.5 w-3.5" />
+                                  Registrar entrega
+                                </Button>
+                              )
+                            )}
+
+                            {lote.status === 'entregue' && (
+                              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                                <CheckCircle2 className="h-4 w-4" />
+                                Lote Entregue
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
 
@@ -1260,7 +1497,7 @@ function FichaObraPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-wider">
                 <Calendar className="h-4 w-4" />
-                <span>Follow-ups Pendentes da Obra ({followups.length})</span>
+                <span>Follow-ups Pendentes da Obra ({followupsGeraisPendentes.length})</span>
               </div>
               <Button
                 size="sm"
@@ -1276,13 +1513,13 @@ function FichaObraPage() {
               </Button>
             </div>
 
-            {followups.length === 0 ? (
+            {followupsGeraisPendentes.length === 0 ? (
               <p className="text-xs text-muted-foreground italic py-1">
                 Nenhum follow-up pendente para esta obra.
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                {followups.map((fup: any) => (
+                {followupsGeraisPendentes.map((fup: any) => (
                   <div
                     key={fup.id}
                     className="rounded-lg border border-border bg-card p-3 text-xs space-y-2 shadow-2xs flex flex-col justify-between"
@@ -1626,11 +1863,49 @@ function FichaObraPage() {
       {/* Modais de Lotes */}
       <DialogNovoLote
         open={modalNovoLote}
-        onOpenChange={setModalNovoLote}
+        onOpenChange={(aberto) => {
+          setModalNovoLote(aberto);
+          if (!aberto) setParamsNovoLote({});
+        }}
+        obraId={obraId}
+        lotes={lotes}
+        initialTipo={paramsNovoLote.tipo}
+        initialSemMedicao={paramsNovoLote.semMedicao}
+        initialDescricao={paramsNovoLote.descricao}
+        onSuccess={() => {
+          setParamsNovoLote({});
+          refetch();
+        }}
+      />
+
+      {/* Modal Agendar Visita ou Serviço */}
+      <DialogAgendarVisita
+        open={modalAgendarVisita}
+        onOpenChange={setModalAgendarVisita}
         obraId={obraId}
         lotes={lotes}
         onSuccess={() => refetch()}
       />
+
+      {/* Modal Concluir Visita ou Serviço */}
+      {visitaConcluindo && (
+        <DialogConcluirVisita
+          open={!!visitaConcluindo}
+          onOpenChange={(v) => {
+            if (!v) setVisitaConcluindo(null);
+          }}
+          obraId={obraId}
+          visita={visitaConcluindo}
+          onSuccess={(reposicao) => {
+            setVisitaConcluindo(null);
+            refetch();
+            if (reposicao) {
+              setParamsNovoLote(reposicao);
+              setModalNovoLote(true);
+            }
+          }}
+        />
+      )}
 
       <DialogEditarLote
         open={modalEditarLote}

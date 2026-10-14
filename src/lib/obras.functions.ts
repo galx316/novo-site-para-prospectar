@@ -5,8 +5,23 @@ import { formatarData, obterHojeSP } from '@/lib/date-utils';
 
 export type TipoLote = Database['public']['Enums']['tipo_lote'];
 export type Entrega = Database['public']['Tables']['entregas']['Row'];
+export type CategoriaFollowup = 'visita_tecnica' | 'regulagem' | 'treinamento' | 'outro';
 type StatusLote = Database['public']['Enums']['status_lote'];
 type TipoRegistro = Database['public']['Enums']['tipo_registro'];
+
+export const CATEGORIAS_VISITA_LABELS: Record<CategoriaFollowup, string> = {
+  visita_tecnica: 'Visita técnica',
+  regulagem: 'Regulagem',
+  treinamento: 'Treinamento de instalação',
+  outro: 'Outro',
+};
+
+export const CATEGORIAS_VISITA_SERVICO: { valor: CategoriaFollowup; rotulo: string }[] = [
+  { valor: 'visita_tecnica', rotulo: 'Visita técnica' },
+  { valor: 'regulagem', rotulo: 'Regulagem' },
+  { valor: 'treinamento', rotulo: 'Treinamento de instalação' },
+  { valor: 'outro', rotulo: 'Outro' },
+];
 
 export const TIPOS_LOTE_LABELS: Record<TipoLote, string> = {
   contramarco: 'Contramarco',
@@ -168,7 +183,7 @@ export const obterObra = createServerFn({ method: 'GET' })
           .from('followups')
           .select('*')
           .eq('obra_id', data.obraId)
-          .eq('status', 'pendente')
+          .in('status', ['pendente', 'concluido'])
           .order('data', { ascending: true }),
       ]);
 
@@ -420,6 +435,7 @@ export const criarLote = createServerFn({ method: 'POST' })
     cadastro_completo?: boolean | undefined;
     previsao_medicao?: string | null | undefined;
     medido_em?: string | null | undefined;
+    sem_medicao?: boolean | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -428,7 +444,9 @@ export const criarLote = createServerFn({ method: 'POST' })
     if (!data.obraId) throw new Error('ID da obra não informado.');
     if (!data.tipo) throw new Error('Tipo de lote não informado.');
 
-    if (data.medido_em && !data.cadastro_completo) {
+    const semMedicao = data.sem_medicao ?? false;
+
+    if (!semMedicao && data.medido_em && !data.cadastro_completo) {
       throw new Error('Complete o cadastro do lote antes da medição.');
     }
 
@@ -448,8 +466,9 @@ export const criarLote = createServerFn({ method: 'POST' })
         descricao: data.descricao?.trim() || null,
         quantidade: data.quantidade ?? null,
         cadastro_completo: data.cadastro_completo ?? false,
-        previsao_medicao: data.previsao_medicao || null,
-        medido_em: data.medido_em || null,
+        previsao_medicao: semMedicao ? null : (data.previsao_medicao || null),
+        medido_em: semMedicao ? null : (data.medido_em || null),
+        sem_medicao: semMedicao,
       })
       .select()
       .single();
@@ -492,6 +511,7 @@ export const editarLote = createServerFn({ method: 'POST' })
     recebimento_confirmado?: boolean | undefined;
     responsavel_recebimento?: string | null | undefined;
     entregue_em?: string | null | undefined;
+    sem_medicao?: boolean | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -520,6 +540,8 @@ export const editarLote = createServerFn({ method: 'POST' })
 
     if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
 
+    const novoSemMedicao =
+      data.sem_medicao !== undefined ? data.sem_medicao : loteAtual.sem_medicao;
     const novoCadastroCompleto =
       data.cadastro_completo !== undefined
         ? data.cadastro_completo
@@ -530,23 +552,23 @@ export const editarLote = createServerFn({ method: 'POST' })
       data.entregue_em !== undefined ? data.entregue_em : loteAtual.entregue_em;
 
     // Regra: não aceite medido_em se o cadastro não estiver completo. Mensagem: "Complete o cadastro do lote antes da medição."
-    if (novoMedidoEm && !novoCadastroCompleto) {
+    if (!novoSemMedicao && novoMedidoEm && !novoCadastroCompleto) {
       throw new Error('Complete o cadastro do lote antes da medição.');
     }
 
-    // Regra: status manual só aceita 'pcp', 'em_producao' ou 'produzido', e só se o lote já tiver medido_em.
+    // Regra: status manual só aceita 'pcp', 'em_producao' ou 'produzido', e só se o lote já tiver medido_em (a não ser que seja sem_medicao).
     if (data.status !== undefined && data.status !== loteAtual.status) {
       const statusManuaisPermitidos: StatusLote[] = ['pcp', 'em_producao', 'produzido'];
       if (!statusManuaisPermitidos.includes(data.status)) {
         throw new Error('Status manual só aceita PCP, Em produção ou Produzido.');
       }
-      if (!novoMedidoEm) {
+      if (!novoSemMedicao && !novoMedidoEm) {
         throw new Error('O lote precisa ter data de medição antes de atualizar a produção.');
       }
     }
 
-    // Regra: não aceite entregue_em sem medido_em.
-    if (novoEntregueEm && !novoMedidoEm) {
+    // Regra: não aceite entregue_em sem medido_em (a não ser que seja sem_medicao).
+    if (!novoSemMedicao && novoEntregueEm && !novoMedidoEm) {
       throw new Error('Não é possível registrar entrega sem o lote ter sido medido.');
     }
 
@@ -562,6 +584,7 @@ export const editarLote = createServerFn({ method: 'POST' })
     if (data.recebimento_confirmado !== undefined) updates.recebimento_confirmado = data.recebimento_confirmado;
     if (data.responsavel_recebimento !== undefined) updates.responsavel_recebimento = data.responsavel_recebimento?.trim() || null;
     if (data.entregue_em !== undefined) updates.entregue_em = data.entregue_em || null;
+    if (data.sem_medicao !== undefined) updates.sem_medicao = data.sem_medicao;
 
     // Regra de alteração de tipo de lote:
     // Se o tipo mudar e o lote não estiver entregue:
@@ -608,7 +631,7 @@ export const editarLote = createServerFn({ method: 'POST' })
 
     if (updErr || !loteAtualizado) throw new Error(updErr?.message || 'Erro ao atualizar lote.');
 
-    // 4. Se medido_em, entregue_em, status ou tipo mudarem, gravar registro tipo 'nota'
+    // 4. Gravações de notas no histórico
     const tipoLegivel = TIPOS_LOTE_LABELS[loteAtualizado.tipo as TipoLote] || loteAtualizado.tipo;
 
     if (tipoMudou) {
@@ -621,6 +644,23 @@ export const editarLote = createServerFn({ method: 'POST' })
         tipo: 'nota',
         direcao: 'nenhuma',
         texto: `Lote: tipo alterado de ${tipoAntes} para ${tipoDepois}`,
+      });
+      if (rErr) throw new Error(rErr.message);
+    }
+
+    const semMedicaoMudou =
+      data.sem_medicao !== undefined && data.sem_medicao !== loteAtual.sem_medicao;
+    if (semMedicaoMudou) {
+      const msg = loteAtualizado.sem_medicao
+        ? `Lote ${tipoLegivel}: marcado como sem medição`
+        : `Lote ${tipoLegivel}: volta a exigir medição`;
+      const { error: rErr } = await supabase.from('registros').insert({
+        obra_id: loteAtualizado.obra_id,
+        lote_id: loteAtualizado.id,
+        cliente_id: obra.cliente_id,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: msg,
       });
       if (rErr) throw new Error(rErr.message);
     }
@@ -947,6 +987,7 @@ export const criarFollowupObra = createServerFn({ method: 'POST' })
     loteId?: string | null | undefined;
     data: string;
     motivo: string;
+    categoria?: CategoriaFollowup | string | null | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -984,6 +1025,7 @@ export const criarFollowupObra = createServerFn({ method: 'POST' })
         lote_id: data.loteId || null,
         data: data.data,
         motivo: data.motivo.trim(),
+        categoria: data.categoria || null,
         origem: 'obra',
         status: 'pendente',
       })
@@ -993,6 +1035,63 @@ export const criarFollowupObra = createServerFn({ method: 'POST' })
     if (insErr || !novoFup) throw new Error(insErr?.message || 'Erro ao criar follow-up da obra.');
 
     return { followup: novoFup };
+  });
+
+/**
+ * 8.2 Concluir visita técnica ou serviço da obra.
+ * Grava registro tipo 'visita' e conclui o follow-up via RPC.
+ */
+export const concluirVisitaObra = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    followupId: string;
+    data: string;
+    relato: string;
+    tipoLabel: string;
+    loteId?: string | null | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    if (!data.followupId) throw new Error('ID do follow-up não informado.');
+    if (!data.relato?.trim()) throw new Error('Informe o que aconteceu na visita/serviço.');
+    if (!data.data) throw new Error('Data não informada.');
+
+    const { data: obra, error: obraErr } = await supabase
+      .from('obras')
+      .select('id, cliente_id')
+      .eq('id', data.obraId)
+      .single();
+    if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
+
+    // 1. Gravar registro tipo 'visita'
+    const ddmm = formatarData(data.data).slice(0, 5);
+    const textoNota = `${data.tipoLabel} em ${ddmm}: ${data.relato.trim()}`;
+
+    const { data: reg, error: regErr } = await supabase
+      .from('registros')
+      .insert({
+        obra_id: data.obraId,
+        lote_id: data.loteId || null,
+        cliente_id: obra.cliente_id,
+        tipo: 'visita',
+        texto: textoNota,
+        data: `${data.data}T12:00:00-03:00`,
+      })
+      .select()
+      .single();
+    if (regErr || !reg) throw new Error(regErr?.message || 'Erro ao registrar visita.');
+
+    // 2. Concluir o follow-up
+    const { error: rpcErr } = await supabase.rpc('concluir_followup', {
+      p_id: data.followupId,
+    });
+    if (rpcErr) throw new Error(rpcErr.message || 'Erro ao concluir follow-up.');
+
+    return { success: true, registroId: reg.id };
   });
 
 /**

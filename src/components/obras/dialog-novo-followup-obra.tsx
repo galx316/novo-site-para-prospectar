@@ -38,8 +38,8 @@ interface DialogNovoFollowupObraProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   obraId: string;
-  lotes?: any[];
-  modeloInicial?: ModeloFollowup;
+  lotes?: any[] | undefined;
+  modeloInicial?: ModeloFollowup | undefined;
   onSuccess: () => void;
 }
 
@@ -239,6 +239,7 @@ export function DialogNovoFollowupObra({
           loteId: loteId || undefined,
           data,
           motivo: motivoLimpo,
+          categoria: modelo === 'treinamento_instalacao' ? 'treinamento' : undefined,
         },
       });
 

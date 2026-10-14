@@ -326,6 +326,7 @@ export type Database = {
       }
       followups: {
         Row: {
+          categoria: string | null
           cliente_id: string | null
           concluido_em: string | null
           contato_id: string | null
@@ -342,6 +343,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          categoria?: string | null
           cliente_id?: string | null
           concluido_em?: string | null
           contato_id?: string | null
@@ -358,6 +360,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          categoria?: string | null
           cliente_id?: string | null
           concluido_em?: string | null
           contato_id?: string | null
@@ -429,6 +432,7 @@ export type Database = {
           quantidade: number | null
           recebimento_confirmado: boolean
           responsavel_recebimento: string | null
+          sem_medicao: boolean
           status: Database["public"]["Enums"]["status_lote"]
           tipo: Database["public"]["Enums"]["tipo_lote"]
           updated_at: string
@@ -450,8 +454,9 @@ export type Database = {
           quantidade?: number | null
           recebimento_confirmado?: boolean
           responsavel_recebimento?: string | null
+          sem_medicao?: boolean
           status?: Database["public"]["Enums"]["status_lote"]
-          tipo: Database["public"]["Enums"]["tipo_lote"]
+          tipo?: Database["public"]["Enums"]["tipo_lote"]
           updated_at?: string
         }
         Update: {
@@ -471,6 +476,7 @@ export type Database = {
           quantidade?: number | null
           recebimento_confirmado?: boolean
           responsavel_recebimento?: string | null
+          sem_medicao?: boolean
           status?: Database["public"]["Enums"]["status_lote"]
           tipo?: Database["public"]["Enums"]["tipo_lote"]
           updated_at?: string
