@@ -130,7 +130,19 @@ export async function lerCronogramaPrado(arrayBuffer: ArrayBuffer): Promise<Cron
         continue;
       }
 
-      // "APTO." + "MOD"
+      // "APTO." + "MOD" ou "APTO" + "." + "MOD"
+      const prox2 = linha.itens[i + 2];
+      if (prox && prox2 && /^APTO$/i.test(atual.texto) && prox.texto === '.' && /^MOD$/i.test(prox2.texto)) {
+        novosItens.push({
+          texto: 'APTO.MOD',
+          x: atual.x,
+          y: atual.y,
+          page: atual.page,
+        });
+        i += 3;
+        continue;
+      }
+
       if (prox && /^APTO\.?$/i.test(atual.texto) && /^MOD$/i.test(prox.texto)) {
         novosItens.push({
           texto: 'APTO.MOD',
@@ -176,9 +188,12 @@ export async function lerCronogramaPrado(arrayBuffer: ArrayBuffer): Promise<Cron
       }
     }
 
-    // Título (ex: "SOL CLUBE MAIA - MEDIÇÃO 2")
+    // Título (ex: "SOL CLUBE MAIA - MEDIÇÃO 2" ou "SOL BONSUCESSO - APTO MODELO")
     if (!titulo) {
-      if (/MEDIÇÃO|MEDICAO/i.test(textoLinha) && !/RELATÓRIO|SISTEMA|CRONOGRAMA/i.test(textoLinha)) {
+      if (
+        /MEDIÇÃO|MEDICAO|APTO\s*MODELO|APTO\.?\s*MOD/i.test(textoLinha) &&
+        !/RELATÓRIO|SISTEMA|CRONOGRAMA/i.test(textoLinha)
+      ) {
         titulo = textoLinha.trim();
       }
     }
@@ -193,7 +208,7 @@ export async function lerCronogramaPrado(arrayBuffer: ArrayBuffer): Promise<Cron
   }
 
   // 5. Localizar cabeçalho da tabela de entregas
-  // Procura linha que contenha cabeçalhos como "1ª ENT", "2ª ENT", etc.
+  // Procura linha que contenha cabeçalhos como "1ª ENT", "2ª ENT", etc. ou "APTO.MOD"
   interface CabecalhoGrupo {
     rotulo: string;
     isEnt: boolean;
@@ -214,7 +229,7 @@ export async function lerCronogramaPrado(arrayBuffer: ArrayBuffer): Promise<Cron
           isEnt: true,
           x: it.x,
         });
-      } else if (/^APTO\.?MOD$/i.test(it.texto)) {
+      } else if (/^APTO\.?\s*MOD$/i.test(it.texto)) {
         gruposEncontrados.push({
           rotulo: 'Apto modelo',
           isEnt: false,
@@ -230,8 +245,9 @@ export async function lerCronogramaPrado(arrayBuffer: ArrayBuffer): Promise<Cron
     }
   }
 
-  // Regra j: Se não achar nenhum cabeçalho "ENT", lançar erro específico
-  if (!linhaCabecalho || cabecalhos.filter((c) => c.isEnt).length === 0) {
+  // Grupos válidos = cabeçalhos "nª ENT" E cabeçalho "APTO.MOD". Basta existir um deles.
+  // Só lance erro quando não houver NENHUM grupo (nem ENT, nem APTO.MOD).
+  if (!linhaCabecalho || cabecalhos.length === 0) {
     throw new Error('Arquivo fora do padrão do cronograma Prado. Preencha as entregas manualmente.');
   }
 

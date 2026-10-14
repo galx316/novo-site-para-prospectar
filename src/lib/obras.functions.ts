@@ -1558,7 +1558,7 @@ export const importarEntregas = createServerFn({ method: 'POST' })
       throw new Error('Nenhuma entrega para importar.');
     }
 
-    // 1. Obter a obra para cliente_id
+    // 1. Obter a obra para cliente_id e conferir que o lote é desta obra
     const { data: obra, error: obraErr } = await supabase
       .from('obras')
       .select('id, cliente_id')
@@ -1566,7 +1566,6 @@ export const importarEntregas = createServerFn({ method: 'POST' })
       .single();
     if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
 
-    // 2. Confira que o lote é desta obra
     const { data: lote, error: loteErr } = await supabase
       .from('lotes')
       .select('id, obra_id, quantidade')
@@ -1575,18 +1574,45 @@ export const importarEntregas = createServerFn({ method: 'POST' })
       .single();
     if (loteErr || !lote) throw new Error(loteErr?.message || 'Lote não encontrado nesta obra.');
 
-    // 3. Se vier quantidadeLote e o lote estiver sem quantidade: grave lotes.quantidade
-    let qtdLoteAtual = lote.quantidade;
-    if (data.quantidadeLote != null && data.quantidadeLote > 0 && lote.quantidade == null) {
+    // 2. Busque todas as entregas do lote
+    const { data: todasEntregas, error: entErr } = await supabase
+      .from('entregas')
+      .select('id, numero, quantidade, entregue_em')
+      .eq('lote_id', data.loteId)
+      .order('numero', { ascending: true });
+    if (entErr) throw new Error(entErr.message || 'Erro ao consultar entregas do lote.');
+    const listaEntregas = todasEntregas || [];
+
+    // 3. Calcule a lista que vai sobrar: se substituirPendentes, só as entregas com entregue_em preenchido; senão, todas
+    const entregasQueSobram = data.substituirPendentes
+      ? listaEntregas.filter((e) => Boolean(e.entregue_em))
+      : listaEntregas;
+
+    // 4. Calcule a quantidade do lote que vale: lote.quantidade ou, se vazio, data.quantidadeLote
+    const qtdLoteValendo =
+      lote.quantidade ??
+      (data.quantidadeLote != null && data.quantidadeLote > 0 ? data.quantidadeLote : null);
+
+    // 5. Confira a soma (entregas que sobram + novas). Se passar, lance "A soma das entregas passa a quantidade do lote." SEM ter apagado nem alterado nada
+    const pecasQueSobram = entregasQueSobram.reduce((sum, e) => sum + (e.quantidade || 0), 0);
+    const pecasNovas = data.entregas.reduce((sum, e) => sum + (e.quantidade || 0), 0);
+    const totalPecasFinal = pecasQueSobram + pecasNovas;
+
+    if (qtdLoteValendo != null && totalPecasFinal > qtdLoteValendo) {
+      throw new Error('A soma das entregas passa a quantidade do lote.');
+    }
+
+    // 6. Só agora:
+    // a) grave lotes.quantidade (se for o caso)
+    if (lote.quantidade == null && data.quantidadeLote != null && data.quantidadeLote > 0) {
       const { error: updLoteErr } = await supabase
         .from('lotes')
         .update({ quantidade: data.quantidadeLote })
         .eq('id', lote.id);
       if (updLoteErr) throw new Error(updLoteErr.message || 'Erro ao atualizar quantidade do lote.');
-      qtdLoteAtual = data.quantidadeLote;
     }
 
-    // 4. Se substituirPendentes: apague as entregas do lote com entregue_em vazio (null)
+    // b) apague as pendentes (se for o caso)
     if (data.substituirPendentes) {
       const { error: delErr } = await supabase
         .from('entregas')
@@ -1596,28 +1622,9 @@ export const importarEntregas = createServerFn({ method: 'POST' })
       if (delErr) throw new Error(delErr.message || 'Erro ao remover entregas pendentes.');
     }
 
-    // 5. Buscar entregas que restaram para numerar novas a partir do maior número + 1
-    const { data: entregasRestantes, error: entErr } = await supabase
-      .from('entregas')
-      .select('id, numero, quantidade, entregue_em')
-      .eq('lote_id', data.loteId)
-      .order('numero', { ascending: true });
-    if (entErr) throw new Error(entErr.message || 'Erro ao consultar entregas do lote.');
-
-    const maiorNumero = (entregasRestantes || []).reduce((max, e) => Math.max(max, e.numero), 0);
-
-    // 6. Regra de soma: se o lote tiver quantidade, a soma de todas as entregas não pode passar.
-    // Mensagem: "A soma das entregas passa a quantidade do lote."
-    const pecasRestantes = (entregasRestantes || []).reduce((sum, e) => sum + (e.quantidade || 0), 0);
-    const pecasNovas = data.entregas.reduce((sum, e) => sum + (e.quantidade || 0), 0);
-    const totalPecasFinal = pecasRestantes + pecasNovas;
-
-    if (qtdLoteAtual != null && totalPecasFinal > qtdLoteAtual) {
-      throw new Error('A soma das entregas passa a quantidade do lote.');
-    }
-
-    // 7. Insira as entregas (previsao = data combinada; data_confirmada = null)
-    let proxNumero = maiorNumero + 1;
+    // c) insira as novas com numero a partir do maior numero que sobrou + 1
+    const maiorNumeroQueSobrou = entregasQueSobram.reduce((max, e) => Math.max(max, e.numero), 0);
+    let proxNumero = maiorNumeroQueSobrou + 1;
     const registrosParaInserir = data.entregas.map((e) => ({
       lote_id: data.loteId,
       numero: proxNumero++,
@@ -1635,7 +1642,7 @@ export const importarEntregas = createServerFn({ method: 'POST' })
       .insert(registrosParaInserir);
     if (insErr) throw new Error(insErr.message || 'Erro ao inserir entregas.');
 
-    // 8. Registro tipo 'nota' (obra_id, lote_id, cliente_id): "Cronograma importado: <n> entrega(s), <total> peças"
+    // d) grave a nota no histórico
     const hoje = obterHojeSP();
     const textoNota = `Cronograma importado: ${data.entregas.length} entrega(s), ${pecasNovas} peças`;
     const { error: notaErr } = await supabase
