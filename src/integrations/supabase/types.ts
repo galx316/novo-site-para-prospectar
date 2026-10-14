@@ -271,6 +271,59 @@ export type Database = {
           },
         ]
       }
+      entregas: {
+        Row: {
+          created_at: string
+          data_confirmada: string | null
+          entregue_em: string | null
+          id: string
+          lote_id: string
+          numero: number
+          observacao: string | null
+          previsao: string | null
+          quantidade: number | null
+          recebimento_confirmado: boolean
+          responsavel_recebimento: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          data_confirmada?: string | null
+          entregue_em?: string | null
+          id?: string
+          lote_id: string
+          numero: number
+          observacao?: string | null
+          previsao?: string | null
+          quantidade?: number | null
+          recebimento_confirmado?: boolean
+          responsavel_recebimento?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          data_confirmada?: string | null
+          entregue_em?: string | null
+          id?: string
+          lote_id?: string
+          numero?: number
+          observacao?: string | null
+          previsao?: string | null
+          quantidade?: number | null
+          recebimento_confirmado?: boolean
+          responsavel_recebimento?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entregas_lote_id_fkey"
+            columns: ["lote_id"]
+            isOneToOne: false
+            referencedRelation: "lotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       followups: {
         Row: {
           cliente_id: string | null

@@ -4,6 +4,7 @@ import type { Database } from '@/integrations/supabase/types';
 import { formatarData, obterHojeSP } from '@/lib/date-utils';
 
 export type TipoLote = Database['public']['Enums']['tipo_lote'];
+export type Entrega = Database['public']['Tables']['entregas']['Row'];
 type StatusLote = Database['public']['Enums']['status_lote'];
 type TipoRegistro = Database['public']['Enums']['tipo_registro'];
 
@@ -145,7 +146,7 @@ export const obterObra = createServerFn({ method: 'GET' })
           : Promise.resolve({ data: null, error: null }),
         supabase
           .from('lotes')
-          .select('*')
+          .select('*, entregas(*)')
           .eq('obra_id', data.obraId)
           .order('created_at', { ascending: true }),
         supabase
@@ -179,11 +180,18 @@ export const obterObra = createServerFn({ method: 'GET' })
     if (arquivosRes.error) throw new Error(arquivosRes.error.message);
     if (followupsRes.error) throw new Error(followupsRes.error.message);
 
+    const lotesProcessados = (lotesRes.data || []).map((lote: any) => ({
+      ...lote,
+      entregas: ((lote.entregas as any[]) || []).sort(
+        (a: any, b: any) => (a.numero || 0) - (b.numero || 0)
+      ),
+    }));
+
     return {
       obra,
       cliente: clienteRes.data,
       oportunidade: opRes.data,
-      lotes: lotesRes.data || [],
+      lotes: lotesProcessados,
       checklist: checklistRes.data || [],
       registros: registrosRes.data || [],
       arquivos: arquivosRes.data || [],
@@ -1208,3 +1216,309 @@ export const excluirArquivo = createServerFn({ method: 'POST' })
 
     return { success: true };
   });
+
+/**
+ * 13. Criar entrega parcial para um lote.
+ */
+export const criarEntrega = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    loteId: string;
+    quantidade?: number | null | undefined;
+    previsao?: string | null | undefined;
+    data_confirmada?: string | null | undefined;
+    observacao?: string | null | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    if (!data.loteId) throw new Error('ID do lote não informado.');
+
+    // 1. Confira que o lote é desta obra.
+    const { data: lote, error: loteErr } = await supabase
+      .from('lotes')
+      .select('*')
+      .eq('id', data.loteId)
+      .single();
+
+    if (loteErr || !lote) throw new Error(loteErr?.message || 'Lote não encontrado.');
+    if (lote.obra_id !== data.obraId) {
+      throw new Error('O lote não pertence à obra informada.');
+    }
+
+    // Buscar obra para obter cliente_id
+    const { data: obra, error: obraErr } = await supabase
+      .from('obras')
+      .select('id, cliente_id')
+      .eq('id', data.obraId)
+      .single();
+
+    if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
+
+    // 2. numero = maior numero do lote + 1 (ou 1).
+    const { data: entregasExistentes, error: entErr } = await supabase
+      .from('entregas')
+      .select('id, numero, quantidade')
+      .eq('lote_id', data.loteId)
+      .order('numero', { ascending: false });
+
+    if (entErr) throw new Error(entErr.message);
+
+    const maiorNumero = (entregasExistentes && entregasExistentes.length > 0 && entregasExistentes[0]) ? entregasExistentes[0].numero : 0;
+    const proximoNumero = maiorNumero + 1;
+
+    // 3. Se o lote tiver quantidade: recuse se a soma das quantidades das entregas passar a quantidade do lote. Mensagem: "A soma das entregas passa a quantidade do lote."
+    if (lote.quantidade != null) {
+      const somaAtual = (entregasExistentes || []).reduce((acc: number, e: any) => acc + (e.quantidade || 0), 0);
+      const novaQtd = data.quantidade || 0;
+      if (somaAtual + novaQtd > lote.quantidade) {
+        throw new Error('A soma das entregas passa a quantidade do lote.');
+      }
+    }
+
+    // 4. Inserir entrega
+    const { data: novaEntrega, error: insErr } = await supabase
+      .from('entregas')
+      .insert({
+        lote_id: data.loteId,
+        numero: proximoNumero,
+        quantidade: data.quantidade ?? null,
+        previsao: data.previsao || null,
+        data_confirmada: data.data_confirmada || null,
+        observacao: data.observacao?.trim() || null,
+      })
+      .select()
+      .single();
+
+    if (insErr || !novaEntrega) throw new Error(insErr?.message || 'Erro ao criar entrega.');
+
+    // 5. Registro tipo 'nota' (obra_id, lote_id, cliente_id): "Lote <tipo>: entrega <n> planejada (<quantidade> peças, previsão <data>)"
+    const tipoLegivel = TIPOS_LOTE_LABELS[lote.tipo as TipoLote] || lote.tipo;
+    const qtdTexto = novaEntrega.quantidade != null ? `${novaEntrega.quantidade} peças` : 'quantidade a definir';
+    const dataRef = novaEntrega.previsao || novaEntrega.data_confirmada;
+    const prevTexto = dataRef ? `previsão ${formatarData(dataRef)}` : 'sem previsão';
+    const textoNota = `Lote ${tipoLegivel}: entrega ${novaEntrega.numero} planejada (${qtdTexto}, ${prevTexto})`;
+
+    const { error: regErr } = await supabase.from('registros').insert({
+      obra_id: data.obraId,
+      lote_id: data.loteId,
+      cliente_id: obra.cliente_id,
+      tipo: 'nota',
+      direcao: 'nenhuma',
+      texto: textoNota,
+    });
+
+    if (regErr) throw new Error(regErr.message);
+
+    return { entrega: novaEntrega };
+  });
+
+/**
+ * 14. Editar entrega parcial.
+ */
+export const editarEntrega = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    entregaId: string;
+    quantidade?: number | null | undefined;
+    previsao?: string | null | undefined;
+    data_confirmada?: string | null | undefined;
+    entregue_em?: string | null | undefined;
+    recebimento_confirmado?: boolean | undefined;
+    responsavel_recebimento?: string | null | undefined;
+    observacao?: string | null | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    if (!data.entregaId) throw new Error('ID da entrega não informado.');
+
+    // 1. Confira que a entrega é de um lote desta obra.
+    const { data: entregaAtual, error: entErr } = await supabase
+      .from('entregas')
+      .select('*, lotes(*)')
+      .eq('id', data.entregaId)
+      .single();
+
+    if (entErr || !entregaAtual) throw new Error(entErr?.message || 'Entrega não encontrada.');
+
+    const lote = entregaAtual.lotes;
+    if (!lote || lote.obra_id !== data.obraId) {
+      throw new Error('A entrega não pertence à obra informada.');
+    }
+
+    const { data: obra, error: obraErr } = await supabase
+      .from('obras')
+      .select('id, cliente_id')
+      .eq('id', data.obraId)
+      .single();
+
+    if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
+
+    // 2. Mesma regra de soma de quantidades.
+    if (lote.quantidade != null) {
+      const { data: todasEntregas, error: todasErr } = await supabase
+        .from('entregas')
+        .select('id, quantidade')
+        .eq('lote_id', lote.id);
+
+      if (todasErr) throw new Error(todasErr.message);
+
+      const novaQtd = data.quantidade !== undefined ? (data.quantidade || 0) : (entregaAtual.quantidade || 0);
+      const somaOutras = (todasEntregas || [])
+        .filter((e) => e.id !== data.entregaId)
+        .reduce((acc, e) => acc + (e.quantidade || 0), 0);
+
+      if (somaOutras + novaQtd > lote.quantidade) {
+        throw new Error('A soma das entregas passa a quantidade do lote.');
+      }
+    }
+
+    // 3. Atualizar entrega
+    const updates: any = {};
+    if (data.quantidade !== undefined) updates.quantidade = data.quantidade ?? null;
+    if (data.previsao !== undefined) updates.previsao = data.previsao || null;
+    if (data.data_confirmada !== undefined) updates.data_confirmada = data.data_confirmada || null;
+    if (data.entregue_em !== undefined) updates.entregue_em = data.entregue_em || null;
+    if (data.recebimento_confirmado !== undefined) updates.recebimento_confirmado = data.recebimento_confirmado;
+    if (data.responsavel_recebimento !== undefined) updates.responsavel_recebimento = data.responsavel_recebimento?.trim() || null;
+    if (data.observacao !== undefined) updates.observacao = data.observacao?.trim() || null;
+
+    const { data: entregaAtualizada, error: updErr } = await supabase
+      .from('entregas')
+      .update(updates)
+      .eq('id', data.entregaId)
+      .select()
+      .single();
+
+    if (updErr || !entregaAtualizada) throw new Error(updErr?.message || 'Erro ao atualizar entrega.');
+
+    // 4. Se entregue_em mudar: registro 'nota': "Lote <tipo>: entrega <n> feita em <data> (<quantidade> peças, recebido por <nome>)"
+    if (entregaAtual.entregue_em !== entregaAtualizada.entregue_em) {
+      const tipoLegivel = TIPOS_LOTE_LABELS[lote.tipo as TipoLote] || lote.tipo;
+      if (entregaAtualizada.entregue_em) {
+        const qtdTexto = entregaAtualizada.quantidade != null ? `${entregaAtualizada.quantidade} peças` : 'quantidade não informada';
+        const respTexto = entregaAtualizada.responsavel_recebimento ? `, recebido por ${entregaAtualizada.responsavel_recebimento}` : '';
+        const textoNota = `Lote ${tipoLegivel}: entrega ${entregaAtualizada.numero} feita em ${formatarData(entregaAtualizada.entregue_em)} (${qtdTexto}${respTexto})`;
+
+        const { error: regErr } = await supabase.from('registros').insert({
+          obra_id: data.obraId,
+          lote_id: lote.id,
+          cliente_id: obra.cliente_id,
+          tipo: 'nota',
+          direcao: 'nenhuma',
+          texto: textoNota,
+        });
+        if (regErr) throw new Error(regErr.message);
+      } else {
+        const textoNota = `Lote ${tipoLegivel}: entrega ${entregaAtualizada.numero} desfeita`;
+        const { error: regErr } = await supabase.from('registros').insert({
+          obra_id: data.obraId,
+          lote_id: lote.id,
+          cliente_id: obra.cliente_id,
+          tipo: 'nota',
+          direcao: 'nenhuma',
+          texto: textoNota,
+        });
+        if (regErr) throw new Error(regErr.message);
+      }
+    }
+
+    return { entrega: entregaAtualizada };
+  });
+
+/**
+ * 15. Excluir entrega parcial.
+ */
+export const excluirEntrega = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    entregaId: string;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    if (!data.entregaId) throw new Error('ID da entrega não informado.');
+
+    // 1. Confira que a entrega é de um lote desta obra.
+    const { data: entrega, error: entErr } = await supabase
+      .from('entregas')
+      .select('*, lotes(*)')
+      .eq('id', data.entregaId)
+      .single();
+
+    if (entErr || !entrega) throw new Error(entErr?.message || 'Entrega não encontrada.');
+
+    const lote = entrega.lotes;
+    if (!lote || lote.obra_id !== data.obraId) {
+      throw new Error('A entrega não pertence à obra informada.');
+    }
+
+    // 2. Recuse se entregue_em estiver preenchido. Mensagem: "Entrega já feita não pode ser excluída."
+    if (entrega.entregue_em) {
+      throw new Error('Entrega já feita não pode ser excluída.');
+    }
+
+    // 3. Apagar entrega
+    const { error: delErr } = await supabase
+      .from('entregas')
+      .delete()
+      .eq('id', data.entregaId);
+
+    if (delErr) throw new Error(delErr.message);
+
+    // 4. Depois de apagar, renumere as entregas restantes do lote em ordem (1, 2, 3...). Faça um update por vez, do menor para o maior numero, para não bater no UNIQUE.
+    const { data: restantes, error: restErr } = await supabase
+      .from('entregas')
+      .select('id, numero')
+      .eq('lote_id', lote.id)
+      .order('numero', { ascending: true });
+
+    if (restErr) throw new Error(restErr.message);
+
+    const listRestantes = restantes || [];
+    for (let i = 0; i < listRestantes.length; i++) {
+      const item = listRestantes[i];
+      if (!item) continue;
+      const novoNumero = i + 1;
+      if (item.numero !== novoNumero) {
+        const { error: renumErr } = await supabase
+          .from('entregas')
+          .update({ numero: novoNumero })
+          .eq('id', item.id);
+
+        if (renumErr) throw new Error(renumErr.message);
+      }
+    }
+
+    const { data: obra } = await supabase
+      .from('obras')
+      .select('id, cliente_id')
+      .eq('id', data.obraId)
+      .single();
+
+    if (obra) {
+      const tipoLegivel = TIPOS_LOTE_LABELS[lote.tipo as TipoLote] || lote.tipo;
+      const { error: regErr } = await supabase.from('registros').insert({
+        obra_id: data.obraId,
+        lote_id: lote.id,
+        cliente_id: obra.cliente_id,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: `Lote ${tipoLegivel}: entrega ${entrega.numero} excluída`,
+      });
+      if (regErr) throw new Error(regErr.message);
+    }
+
+    return { success: true };
+  });
+

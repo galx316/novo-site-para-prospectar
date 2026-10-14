@@ -10,8 +10,10 @@ import {
   editarLote,
   linkArquivo,
   excluirArquivo,
+  excluirEntrega,
   TIPOS_LOTE_LABELS,
   STATUS_LOTE_LABELS,
+  type Entrega,
 } from '@/lib/obras.functions';
 import {
   concluirFollowup,
@@ -51,6 +53,8 @@ import { DialogNovoFollowupObra } from '@/components/obras/dialog-novo-followup-
 import { DialogRemarcar } from '@/components/prospeccao/dialog-remarcar';
 import { DialogAcaoEtapaLote, type AcaoEtapaTipo } from '@/components/obras/dialog-acao-etapa-lote';
 import { DialogEnviarArquivos } from '@/components/obras/dialog-enviar-arquivos';
+import { DialogFormEntrega } from '@/components/obras/dialog-form-entrega';
+import { DialogRegistrarEntregaParcial } from '@/components/obras/dialog-registrar-entrega-parcial';
 import {
   Building2,
   ArrowLeft,
@@ -124,6 +128,15 @@ function FichaObraPage() {
   const [modalEnviarArquivos, setModalEnviarArquivos] = useState(false);
   const [arquivoExcluindo, setArquivoExcluindo] = useState<any | null>(null);
 
+  // Entregas Parciais
+  const [modalFormEntrega, setModalFormEntrega] = useState(false);
+  const [loteEntrega, setLoteEntrega] = useState<any | null>(null);
+  const [entregaEditando, setEntregaEditando] = useState<Entrega | null>(null);
+  const [modalRegistrarEntrega, setModalRegistrarEntrega] = useState(false);
+  const [entregaRegistrando, setEntregaRegistrando] = useState<Entrega | null>(null);
+  const [entregaParaExcluir, setEntregaParaExcluir] = useState<Entrega | null>(null);
+  const [excluindoEntrega, setExcluindoEntrega] = useState(false);
+
   // Edição de nota em item do checklist
   const [editandoNotaItemId, setEditandoNotaItemId] = useState<string | null>(null);
   const [textoNotaItem, setTextoNotaItem] = useState('');
@@ -134,6 +147,7 @@ function FichaObraPage() {
   const executarResolverProblema = useServerFn(resolverProblema);
   const executarMarcarChecklist = useServerFn(marcarItemChecklist);
   const executarEditarLote = useServerFn(editarLote);
+  const executarExcluirEntrega = useServerFn(excluirEntrega);
   const executarLinkArquivo = useServerFn(linkArquivo);
   const executarExcluirArquivo = useServerFn(excluirArquivo);
   const executarConcluirFup = useServerFn(concluirFollowup);
@@ -323,6 +337,44 @@ function FichaObraPage() {
       refetch();
     } catch (err: any) {
       toast.error(err.message || 'Erro ao excluir arquivo.');
+    }
+  }
+
+  function abrirNovaEntrega(lote: any) {
+    setLoteEntrega(lote);
+    setEntregaEditando(null);
+    setModalFormEntrega(true);
+  }
+
+  function abrirEditarEntrega(lote: any, entrega: Entrega) {
+    setLoteEntrega(lote);
+    setEntregaEditando(entrega);
+    setModalFormEntrega(true);
+  }
+
+  function abrirRegistrarEntrega(lote: any, entrega: Entrega) {
+    setLoteEntrega(lote);
+    setEntregaRegistrando(entrega);
+    setModalRegistrarEntrega(true);
+  }
+
+  async function handleConfirmarExcluirEntrega() {
+    if (!entregaParaExcluir) return;
+    try {
+      setExcluindoEntrega(true);
+      await executarExcluirEntrega({
+        data: {
+          obraId,
+          entregaId: entregaParaExcluir.id,
+        },
+      });
+      toast.success(`Entrega ${entregaParaExcluir.numero} excluída com sucesso.`);
+      setEntregaParaExcluir(null);
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao excluir entrega.');
+    } finally {
+      setExcluindoEntrega(false);
     }
   }
 
@@ -530,7 +582,25 @@ function FichaObraPage() {
               {lotes.map((lote: any) => {
                 const tipoLegivel = TIPOS_LOTE_LABELS[lote.tipo as keyof typeof TIPOS_LOTE_LABELS] || lote.tipo;
                 const statusLegivel = STATUS_LOTE_LABELS[lote.status as keyof typeof STATUS_LOTE_LABELS] || lote.status;
-                const dataEntregaRef = lote.data_confirmada || lote.previsao_entrega;
+                const entregas = (lote.entregas as Entrega[]) || [];
+                const temEntregas = entregas.length > 0;
+                const totalEntregas = entregas.length;
+                const entregasFeitas = entregas.filter((e) => !!e.entregue_em).length;
+                const pecasEntregues = entregas
+                  .filter((e) => !!e.entregue_em)
+                  .reduce((acc, e) => acc + (e.quantidade || 0), 0);
+                const totalPecas = lote.quantidade != null
+                  ? lote.quantidade
+                  : entregas.reduce((acc, e) => acc + (e.quantidade || 0), 0);
+                const resumoTexto = `${entregasFeitas} de ${totalEntregas} entregas feitas • ${pecasEntregues} de ${totalPecas} peças`;
+                const proximaEntregaPendente = entregas.find((e) => !e.entregue_em);
+
+                const dataEntregaRef = temEntregas
+                  ? proximaEntregaPendente
+                    ? proximaEntregaPendente.data_confirmada || proximaEntregaPendente.previsao
+                    : (entregas[entregas.length - 1]?.entregue_em || lote.data_confirmada)
+                  : (lote.data_confirmada || lote.previsao_entrega);
+
                 const isEntregue = lote.status === 'entregue' || !!lote.entregue_em;
                 const diasRestantes = !isEntregue ? diasAteData(dataEntregaRef) : null;
 
@@ -632,8 +702,8 @@ function FichaObraPage() {
                       </div>
                     </div>
 
-                    {/* Detalhe de Confirmação ou Entrega */}
-                    {(lote.data_confirmada || lote.entregue_em) && (
+                    {/* Detalhe de Confirmação ou Entrega (lote sem entregas parciais) */}
+                    {!temEntregas && (lote.data_confirmada || lote.entregue_em) && (
                       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                         {lote.data_confirmada && (
                           <span>
@@ -648,6 +718,151 @@ function FichaObraPage() {
                         )}
                       </div>
                     )}
+
+                    {/* Seção Entregas */}
+                    <div className="rounded-lg border border-border bg-accent/15 p-3.5 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Truck className="h-4 w-4 text-primary shrink-0" />
+                          <span className="font-bold text-xs uppercase tracking-wider text-foreground">
+                            Entregas {temEntregas ? `(${totalEntregas})` : ''}
+                          </span>
+                          {temEntregas && (
+                            <span className="text-xs text-muted-foreground font-medium">
+                              • {resumoTexto}
+                            </span>
+                          )}
+                        </div>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => abrirNovaEntrega(lote)}
+                          className="h-7 text-xs font-semibold gap-1 self-start sm:self-auto"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Entrega
+                        </Button>
+                      </div>
+
+                      {entregas.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">
+                          Nenhuma entrega parcial cadastrada (entrega única). Clique em "+ Entrega" para dividir o lote em remessas.
+                        </p>
+                      ) : (
+                        <div className="divide-y divide-border/50 rounded-md border border-border/60 bg-background/60 overflow-hidden">
+                          {entregas.map((ent: Entrega) => {
+                            const entEntregue = !!ent.entregue_em;
+                            return (
+                              <div
+                                key={ent.id}
+                                className="p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs hover:bg-accent/20 transition-colors"
+                              >
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-foreground">
+                                      Entrega {ent.numero}
+                                    </span>
+                                    {ent.quantidade != null && (
+                                      <Badge variant="outline" className="text-[11px] font-semibold">
+                                        {ent.quantidade} peças
+                                      </Badge>
+                                    )}
+                                    {entEntregue ? (
+                                      <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] font-bold">
+                                        Entregue
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-[10px]">
+                                        Pendente
+                                      </Badge>
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-[11px]">
+                                    {ent.previsao && (
+                                      <span>
+                                        Previsão: <strong className="text-foreground">{formatarData(ent.previsao)}</strong>
+                                      </span>
+                                    )}
+                                    {ent.data_confirmada && (
+                                      <span>
+                                        Confirmada: <strong className="text-foreground">{formatarData(ent.data_confirmada)}</strong>
+                                      </span>
+                                    )}
+                                    {ent.entregue_em && (
+                                      <span>
+                                        Entregue em: <strong className="text-foreground">{formatarData(ent.entregue_em)}</strong>
+                                      </span>
+                                    )}
+                                    {ent.responsavel_recebimento && (
+                                      <span>
+                                        Recebido por: <strong className="text-foreground">{ent.responsavel_recebimento}</strong>
+                                      </span>
+                                    )}
+                                    {ent.observacao && (
+                                      <span className="italic text-muted-foreground">
+                                        Obs: {ent.observacao}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 self-end md:self-auto shrink-0">
+                                  {!entEntregue && (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => abrirRegistrarEntrega(lote, ent)}
+                                        className="h-7 px-2.5 text-xs font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                      >
+                                        <Check className="h-3 w-3" />
+                                        Registrar entrega
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => abrirEditarEntrega(lote, ent)}
+                                        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+                                      >
+                                        <Edit2 className="h-3 w-3" />
+                                        Editar
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setEntregaParaExcluir(ent)}
+                                        className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 gap-1"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                        Excluir
+                                      </Button>
+                                    </>
+                                  )}
+
+                                  {entEntregue && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => abrirEditarEntrega(lote, ent)}
+                                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+                                    >
+                                      <Edit2 className="h-3 w-3" />
+                                      Editar
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
 
                     {/* Ação principal por etapa */}
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60">
@@ -702,26 +917,52 @@ function FichaObraPage() {
                               <Factory className="h-3.5 w-3.5" />
                               Atualizar produção
                             </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => abrirAcaoEtapa('confirmar_entrega', lote)}
-                              className="h-8 text-xs font-semibold gap-1.5"
-                            >
-                              <Calendar className="h-3.5 w-3.5" />
-                              Confirmar data de entrega
-                            </Button>
+                            {temEntregas ? (
+                              proximaEntregaPendente && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
+                                  className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                >
+                                  <Truck className="h-3.5 w-3.5" />
+                                  Registrar próxima entrega
+                                </Button>
+                              )
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => abrirAcaoEtapa('confirmar_entrega', lote)}
+                                className="h-8 text-xs font-semibold gap-1.5"
+                              >
+                                <Calendar className="h-3.5 w-3.5" />
+                                Confirmar data de entrega
+                              </Button>
+                            )}
                           </>
                         )}
 
                         {lote.status === 'produzido' && (
-                          <Button
-                            size="sm"
-                            onClick={() => abrirAcaoEtapa('registrar_entrega', lote)}
-                            className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                          >
-                            <Truck className="h-3.5 w-3.5" />
-                            Registrar entrega
-                          </Button>
+                          temEntregas ? (
+                            proximaEntregaPendente && (
+                              <Button
+                                size="sm"
+                                onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
+                                className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                              >
+                                <Truck className="h-3.5 w-3.5" />
+                                Registrar próxima entrega
+                              </Button>
+                            )
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => abrirAcaoEtapa('registrar_entrega', lote)}
+                              className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                              <Truck className="h-3.5 w-3.5" />
+                              Registrar entrega
+                            </Button>
+                          )
                         )}
 
                         {lote.status === 'entregue' && (
@@ -1294,6 +1535,51 @@ function FichaObraPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Excluir Arquivo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modais de Entregas Parciais */}
+      <DialogFormEntrega
+        open={modalFormEntrega}
+        onOpenChange={setModalFormEntrega}
+        obraId={obraId}
+        lote={loteEntrega}
+        entrega={entregaEditando}
+        onSuccess={() => refetch()}
+      />
+
+      <DialogRegistrarEntregaParcial
+        open={modalRegistrarEntrega}
+        onOpenChange={setModalRegistrarEntrega}
+        obraId={obraId}
+        lote={loteEntrega}
+        entrega={entregaRegistrando}
+        onSuccess={() => refetch()}
+      />
+
+      <AlertDialog
+        open={!!entregaParaExcluir}
+        onOpenChange={(open) => {
+          if (!open) setEntregaParaExcluir(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir entrega {entregaParaExcluir?.numero}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta entrega será excluída e as entregas posteriores serão renumeradas automaticamente. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={excluindoEntrega}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmarExcluirEntrega}
+              disabled={excluindoEntrega}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {excluindoEntrega ? 'Excluindo...' : 'Excluir Entrega'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

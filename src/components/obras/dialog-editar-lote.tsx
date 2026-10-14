@@ -100,7 +100,9 @@ export function DialogEditarLote({
       return;
     }
 
-    if (entregueEm && !medidoEm) {
+    const temEntregasParciais = Array.isArray(lote.entregas) && lote.entregas.length > 0;
+
+    if (!temEntregasParciais && entregueEm && !medidoEm) {
       toast.error('Não é possível registrar entrega sem o lote ter sido medido.');
       return;
     }
@@ -118,11 +120,14 @@ export function DialogEditarLote({
         cadastro_completo: cadastroCompleto,
         previsao_medicao: previsaoMedicao || null,
         medido_em: medidoEm || null,
-        data_confirmada: dataConfirmada || null,
-        recebimento_confirmado: recebimentoConfirmado,
-        responsavel_recebimento: responsavelRecebimento.trim() || null,
-        entregue_em: entregueEm || null,
       };
+
+      if (!temEntregasParciais) {
+        payload.data_confirmada = dataConfirmada || null;
+        payload.recebimento_confirmado = recebimentoConfirmado;
+        payload.responsavel_recebimento = responsavelRecebimento.trim() || null;
+        payload.entregue_em = entregueEm || null;
+      }
 
       // Só envia status se for um dos status manuais ('pcp', 'em_producao', 'produzido')
       if (['pcp', 'em_producao', 'produzido'].includes(status) && status !== lote.status) {
@@ -311,63 +316,71 @@ export function DialogEditarLote({
           </div>
 
           {/* Entrega */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label htmlFor="edit-data-conf" className="text-xs font-semibold text-foreground">
-                Data Confirmada de Entrega
-              </label>
-              <Input
-                id="edit-data-conf"
-                type="date"
-                value={dataConfirmada}
-                onChange={(e) => setDataConfirmada(e.target.value)}
-                disabled={salvando || excluindo}
-                className="h-9"
-              />
+          {Array.isArray(lote.entregas) && lote.entregas.length > 0 ? (
+            <div className="rounded-lg border border-border bg-accent/20 p-3 text-xs text-muted-foreground">
+              Datas de entrega controladas pelas entregas abaixo.
             </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-data-conf" className="text-xs font-semibold text-foreground">
+                    Data Confirmada de Entrega
+                  </label>
+                  <Input
+                    id="edit-data-conf"
+                    type="date"
+                    value={dataConfirmada}
+                    onChange={(e) => setDataConfirmada(e.target.value)}
+                    disabled={salvando || excluindo}
+                    className="h-9"
+                  />
+                </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="edit-entregue-em" className="text-xs font-semibold text-foreground">
-                Entregue em (Data Efetiva)
-              </label>
-              <Input
-                id="edit-entregue-em"
-                type="date"
-                value={entregueEm}
-                onChange={(e) => setEntregueEm(e.target.value)}
-                disabled={salvando || excluindo}
-                className="h-9"
-              />
-            </div>
-          </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-entregue-em" className="text-xs font-semibold text-foreground">
+                    Entregue em (Data Efetiva)
+                  </label>
+                  <Input
+                    id="edit-entregue-em"
+                    type="date"
+                    value={entregueEm}
+                    onChange={(e) => setEntregueEm(e.target.value)}
+                    disabled={salvando || excluindo}
+                    className="h-9"
+                  />
+                </div>
+              </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-            <div className="space-y-1.5">
-              <label htmlFor="edit-resp-rec" className="text-xs font-semibold text-foreground">
-                Responsável pelo Recebimento
-              </label>
-              <Input
-                id="edit-resp-rec"
-                placeholder="Ex: Engenheiro Carlos"
-                value={responsavelRecebimento}
-                onChange={(e) => setResponsavelRecebimento(e.target.value)}
-                disabled={salvando || excluindo}
-                className="h-9"
-              />
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-resp-rec" className="text-xs font-semibold text-foreground">
+                    Responsável pelo Recebimento
+                  </label>
+                  <Input
+                    id="edit-resp-rec"
+                    placeholder="Ex: Engenheiro Carlos"
+                    value={responsavelRecebimento}
+                    onChange={(e) => setResponsavelRecebimento(e.target.value)}
+                    disabled={salvando || excluindo}
+                    className="h-9"
+                  />
+                </div>
 
-            <div className="flex items-center gap-2 pt-5">
-              <Checkbox
-                id="edit-rec-conf"
-                checked={recebimentoConfirmado}
-                onCheckedChange={(checked) => setRecebimentoConfirmado(!!checked)}
-                disabled={salvando || excluindo}
-              />
-              <label htmlFor="edit-rec-conf" className="text-xs font-semibold text-foreground cursor-pointer">
-                Recebimento confirmado
-              </label>
-            </div>
-          </div>
+                <div className="flex items-center gap-2 pt-5">
+                  <Checkbox
+                    id="edit-rec-conf"
+                    checked={recebimentoConfirmado}
+                    onCheckedChange={(checked) => setRecebimentoConfirmado(!!checked)}
+                    disabled={salvando || excluindo}
+                  />
+                  <label htmlFor="edit-rec-conf" className="text-xs font-semibold text-foreground cursor-pointer">
+                    Recebimento confirmado
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Confirmação de exclusão em tela */}
           {confirmarExcluir && (
