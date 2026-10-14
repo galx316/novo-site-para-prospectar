@@ -1182,7 +1182,7 @@ export const linkArquivo = createServerFn({ method: 'POST' })
 
     const { data: signed, error: signErr } = await supabase.storage
       .from('arquivos')
-      .createSignedUrl(arq.caminho, 300);
+      .createSignedUrl(arq.caminho, 3600);
 
     if (signErr || !signed) throw new Error(signErr?.message || 'Erro ao gerar link do arquivo.');
 

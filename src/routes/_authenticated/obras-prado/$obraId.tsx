@@ -21,6 +21,7 @@ import {
   cancelarFollowup,
 } from '@/lib/prospeccao.functions';
 import { formatarData, formatarDataHora, diasAteData, obterHojeSP } from '@/lib/date-utils';
+import { abrirArquivoSeguro } from '@/lib/abrir-arquivo';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -333,15 +334,14 @@ function FichaObraPage() {
     setModalNota(true);
   }
 
-  async function handleAbrirArquivo(arquivoId: string) {
-    try {
+  function handleAbrirArquivo(arquivoId: string) {
+    abrirArquivoSeguro(async () => {
       const res = await executarLinkArquivo({ data: { arquivoId } });
-      if (res?.url) {
-        window.open(res.url, '_blank', 'noopener,noreferrer');
+      if (!res?.url) {
+        throw new Error('URL do arquivo não retornada pelo servidor.');
       }
-    } catch (err: any) {
-      toast.error(err.message || 'Erro ao gerar link do arquivo.');
-    }
+      return res.url;
+    });
   }
 
   async function handleConfirmarExcluirArquivo() {
