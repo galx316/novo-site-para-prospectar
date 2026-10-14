@@ -12,7 +12,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Package, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -35,10 +34,6 @@ export function DialogFormEntrega({
 }: DialogFormEntregaProps) {
   const [quantidade, setQuantidade] = useState<string>('');
   const [previsao, setPrevisao] = useState('');
-  const [dataConfirmada, setDataConfirmada] = useState('');
-  const [entregueEm, setEntregueEm] = useState('');
-  const [recebimentoConfirmado, setRecebimentoConfirmado] = useState(false);
-  const [responsavelRecebimento, setResponsavelRecebimento] = useState('');
   const [observacao, setObservacao] = useState('');
   const [salvando, setSalvando] = useState(false);
 
@@ -51,18 +46,10 @@ export function DialogFormEntrega({
     if (entrega) {
       setQuantidade(entrega.quantidade != null ? String(entrega.quantidade) : '');
       setPrevisao(entrega.previsao ? entrega.previsao.slice(0, 10) : '');
-      setDataConfirmada(entrega.data_confirmada ? entrega.data_confirmada.slice(0, 10) : '');
-      setEntregueEm(entrega.entregue_em ? entrega.entregue_em.slice(0, 10) : '');
-      setRecebimentoConfirmado(!!entrega.recebimento_confirmado);
-      setResponsavelRecebimento(entrega.responsavel_recebimento || '');
       setObservacao(entrega.observacao || '');
     } else {
       setQuantidade('');
       setPrevisao('');
-      setDataConfirmada('');
-      setEntregueEm('');
-      setRecebimentoConfirmado(false);
-      setResponsavelRecebimento('');
       setObservacao('');
     }
   }, [entrega, open]);
@@ -82,10 +69,7 @@ export function DialogFormEntrega({
             entregaId: entrega.id,
             quantidade: isNaN(qtdNum as number) ? null : qtdNum,
             previsao: previsao || null,
-            data_confirmada: dataConfirmada || null,
-            entregue_em: entregueEm || null,
-            recebimento_confirmado: recebimentoConfirmado,
-            responsavel_recebimento: responsavelRecebimento.trim() || null,
+            data_confirmada: null,
             observacao: observacao.trim() || null,
           },
         });
@@ -97,11 +81,11 @@ export function DialogFormEntrega({
             loteId: lote.id,
             quantidade: isNaN(qtdNum as number) ? null : qtdNum,
             previsao: previsao || null,
-            data_confirmada: dataConfirmada || null,
+            data_confirmada: null,
             observacao: observacao.trim() || null,
           },
         });
-        toast.success('Entrega parcial criada com sucesso.');
+        toast.success('Entrega planejada com sucesso.');
       }
 
       onOpenChange(false);
@@ -115,28 +99,27 @@ export function DialogFormEntrega({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-2 text-primary mb-1">
             <Package className="h-5 w-5" />
             <span className="text-xs font-bold uppercase tracking-wider">
-              {isEdicao ? `Editar Entrega ${entrega?.numero}` : 'Nova Entrega Parcial'}
+              {isEdicao ? `Editar Entrega ${entrega?.numero}` : 'Nova Entrega'}
             </span>
           </div>
           <DialogTitle className="text-xl font-bold">
-            {isEdicao ? `Entrega ${entrega?.numero}` : 'Planejar Entrega Parcial'}
+            {isEdicao ? `Entrega ${entrega?.numero}` : 'Combinar Entrega'}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            {isEdicao
-              ? 'Ajuste os dados, datas e confirmação de recebimento da entrega.'
-              : 'Defina a quantidade de peças e datas previstas para esta remessa do lote.'}
+            Defina a quantidade de peças e a data combinada com a obra para esta entrega.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
+          {/* Quantidade (opcional) */}
           <div className="space-y-1.5">
             <label htmlFor="ent-qtd" className="text-xs font-semibold text-foreground">
-              Quantidade de Peças
+              Quantidade de Peças (opcional)
             </label>
             <Input
               id="ent-qtd"
@@ -150,82 +133,25 @@ export function DialogFormEntrega({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label htmlFor="ent-prev" className="text-xs font-semibold text-foreground">
-                Previsão de Entrega
-              </label>
-              <Input
-                id="ent-prev"
-                type="date"
-                value={previsao}
-                onChange={(e) => setPrevisao(e.target.value)}
-                disabled={salvando}
-                className="h-9"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="ent-data-conf" className="text-xs font-semibold text-foreground">
-                Data Confirmada
-              </label>
-              <Input
-                id="ent-data-conf"
-                type="date"
-                value={dataConfirmada}
-                onChange={(e) => setDataConfirmada(e.target.value)}
-                disabled={salvando}
-                className="h-9"
-              />
-            </div>
+          {/* Data combinada */}
+          <div className="space-y-1.5">
+            <label htmlFor="ent-prev" className="text-xs font-semibold text-foreground">
+              Data Combinada
+            </label>
+            <Input
+              id="ent-prev"
+              type="date"
+              value={previsao}
+              onChange={(e) => setPrevisao(e.target.value)}
+              disabled={salvando}
+              className="h-9"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Data de entrega alinhada diretamente com a obra.
+            </p>
           </div>
 
-          {isEdicao && (
-            <div className="rounded-lg border border-border bg-accent/20 p-3 space-y-3">
-              <p className="text-xs font-bold text-foreground">Dados de Efetivação / Recebimento</p>
-
-              <div className="space-y-1.5">
-                <label htmlFor="ent-entregue-em" className="text-xs font-semibold text-foreground">
-                  Entregue em (Data Efetiva)
-                </label>
-                <Input
-                  id="ent-entregue-em"
-                  type="date"
-                  value={entregueEm}
-                  onChange={(e) => setEntregueEm(e.target.value)}
-                  disabled={salvando}
-                  className="h-9"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label htmlFor="ent-resp" className="text-xs font-semibold text-foreground">
-                  Responsável pelo Recebimento
-                </label>
-                <Input
-                  id="ent-resp"
-                  placeholder="Ex: Engenheiro Carlos"
-                  value={responsavelRecebimento}
-                  onChange={(e) => setResponsavelRecebimento(e.target.value)}
-                  disabled={salvando}
-                  className="h-9"
-                />
-              </div>
-
-              <div className="flex items-center gap-2 pt-1">
-                <Checkbox
-                  id="ent-rec-conf"
-                  checked={recebimentoConfirmado}
-                  onCheckedChange={(checked) => setRecebimentoConfirmado(!!checked)}
-                  disabled={salvando}
-                />
-                <label htmlFor="ent-rec-conf" className="text-xs font-semibold text-foreground cursor-pointer">
-                  Recebimento confirmado
-                </label>
-              </div>
-            </div>
-          )}
-
+          {/* Observação (opcional) */}
           <div className="space-y-1.5">
             <label htmlFor="ent-obs" className="text-xs font-semibold text-foreground">
               Observação (opcional)

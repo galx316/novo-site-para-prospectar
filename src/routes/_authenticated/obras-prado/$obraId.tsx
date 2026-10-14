@@ -8,7 +8,6 @@ import {
   resolverProblema,
   marcarItemChecklist,
   editarLote,
-  linkArquivo,
   excluirArquivo,
   excluirEntrega,
   TIPOS_LOTE_LABELS,
@@ -21,7 +20,7 @@ import {
   cancelarFollowup,
 } from '@/lib/prospeccao.functions';
 import { formatarData, formatarDataHora, diasAteData, obterHojeSP } from '@/lib/date-utils';
-import { abrirArquivoSeguro } from '@/lib/abrir-arquivo';
+import { VisualizadorArquivo, type ArquivoParaVisualizar } from '@/components/obras/visualizador-arquivo';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -130,6 +129,7 @@ function FichaObraPage() {
   // Arquivos
   const [modalEnviarArquivos, setModalEnviarArquivos] = useState(false);
   const [arquivoExcluindo, setArquivoExcluindo] = useState<any | null>(null);
+  const [arquivoVisualizando, setArquivoVisualizando] = useState<ArquivoParaVisualizar | null>(null);
 
   // Entregas Parciais
   const [modalFormEntrega, setModalFormEntrega] = useState(false);
@@ -151,7 +151,6 @@ function FichaObraPage() {
   const executarMarcarChecklist = useServerFn(marcarItemChecklist);
   const executarEditarLote = useServerFn(editarLote);
   const executarExcluirEntrega = useServerFn(excluirEntrega);
-  const executarLinkArquivo = useServerFn(linkArquivo);
   const executarExcluirArquivo = useServerFn(excluirArquivo);
   const executarConcluirFup = useServerFn(concluirFollowup);
   const executarCancelarFup = useServerFn(cancelarFollowup);
@@ -334,13 +333,17 @@ function FichaObraPage() {
     setModalNota(true);
   }
 
-  function handleAbrirArquivo(arquivoId: string) {
-    abrirArquivoSeguro(async () => {
-      const res = await executarLinkArquivo({ data: { arquivoId } });
-      if (!res?.url) {
-        throw new Error('URL do arquivo não retornada pelo servidor.');
-      }
-      return res.url;
+  function handleVerArquivo(arq: {
+    nome: string;
+    mime?: string | null | undefined;
+    caminho: string;
+    tamanho?: number | null | undefined;
+  }) {
+    setArquivoVisualizando({
+      nome: arq.nome,
+      mime: arq.mime ?? null,
+      caminho: arq.caminho,
+      tamanho: arq.tamanho ?? null,
     });
   }
 
@@ -690,7 +693,7 @@ function FichaObraPage() {
                           )}
                         </div>
 
-                        {/* 4. Anexos da Medição com Abrir */}
+                        {/* 4. Anexos da Medição com Ver */}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {arqsMedicao.length > 0 ? (
                             arqsMedicao.map((arq: any) => (
@@ -699,13 +702,13 @@ function FichaObraPage() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleAbrirArquivo(arq.id)}
-                                className="h-7 px-2.5 text-xs gap-1 border-border/80 hover:border-primary text-foreground"
-                                title={`Abrir ${arq.nome}`}
+                                onClick={() => handleVerArquivo(arq)}
+                                className="h-7 px-2.5 text-xs gap-1.5 border-border/80 hover:border-primary text-foreground"
+                                title={`Ver ${arq.nome}`}
                               >
                                 <Paperclip className="h-3.5 w-3.5 text-primary" />
                                 <span className="max-w-[130px] truncate">{arq.nome}</span>
-                                <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-[11px] font-semibold text-primary">Ver</span>
                               </Button>
                             ))
                           ) : (
@@ -759,7 +762,6 @@ function FichaObraPage() {
                 const tipoLegivel = TIPOS_LOTE_LABELS[lote.tipo as keyof typeof TIPOS_LOTE_LABELS] || lote.tipo;
                 const statusLegivel = STATUS_LOTE_LABELS[lote.status as keyof typeof STATUS_LOTE_LABELS] || lote.status;
                 const entregas = (lote.entregas as Entrega[]) || [];
-                const temEntregas = entregas.length > 0;
                 const totalEntregas = entregas.length;
                 const entregasFeitas = entregas.filter((e) => !!e.entregue_em).length;
                 const pecasEntregues = entregas
@@ -769,141 +771,99 @@ function FichaObraPage() {
                   ? lote.quantidade
                   : entregas.reduce((acc, e) => acc + (e.quantidade || 0), 0);
                 const resumoTexto = `${entregasFeitas} de ${totalEntregas} entregas feitas • ${pecasEntregues} de ${totalPecas} peças`;
-                const proximaEntregaPendente = entregas.find((e) => !e.entregue_em);
-
-                const dataEntregaRef = temEntregas
-                  ? proximaEntregaPendente
-                    ? proximaEntregaPendente.data_confirmada || proximaEntregaPendente.previsao
-                    : (entregas[entregas.length - 1]?.entregue_em || lote.data_confirmada)
-                  : (lote.data_confirmada || lote.previsao_entrega);
 
                 const isEntregue = lote.status === 'entregue' || !!lote.entregue_em;
-                const diasRestantes = !isEntregue ? diasAteData(dataEntregaRef) : null;
+                const entregasPendentes = entregas.filter((e) => !e.entregue_em);
+                const proximaEntregaPendente = entregasPendentes[0];
+                const dataCombinadaRef = proximaEntregaPendente?.previsao || null;
+                const temDataCombinada = Boolean(dataCombinadaRef);
 
-                // Cores do prazo: vermelho se atrasada; amarelo se faltam 7 dias ou menos
-                let prazoBadgeClass = 'bg-accent/40 text-foreground border-border';
+                // Cores do card, pela PRÓXIMA entrega pendente (data combinada):
+                // - vermelho: data passou e não foi entregue.
+                // - amarelo: faltam 7 dias ou menos.
+                // - Se não houver data combinada: use o Prazo Prado só para a cor, e mostre "Sem data combinada" em cinza.
+                const dataCorRef = temDataCombinada ? dataCombinadaRef : lote.previsao_entrega;
+                const diasRestantes = !isEntregue && dataCorRef ? diasAteData(dataCorRef) : null;
+
+                let cardCorClass = 'border-border bg-card';
                 if (!isEntregue && diasRestantes !== null) {
                   if (diasRestantes < 0) {
-                    prazoBadgeClass = 'bg-destructive/15 text-destructive border-destructive/30 font-bold';
+                    cardCorClass = 'border-destructive/60 bg-destructive/[0.02] shadow-2xs';
                   } else if (diasRestantes <= 7) {
-                    prazoBadgeClass = 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 font-bold';
+                    cardCorClass = 'border-amber-500/60 bg-amber-500/[0.02] shadow-2xs';
                   }
                 }
+
+                // Linha 1: "<nª medição> · <Tipo> · <descrição>" + badge de status.
+                const medicaoIdx = painelMedicoes.findIndex((item: any) => item.id === lote.id);
+                const numMedicao = medicaoIdx >= 0 ? `${medicaoIdx + 1}ª medição` : null;
+                const tituloLote = [numMedicao, tipoLegivel, lote.descricao].filter(Boolean).join(' · ');
+
+                // Linha 2: "Medido em dd/mm/aaaa" (ou "Medição prevista dd/mm/aaaa" ou "Sem medição") + quantidade.
+                let textoMedicao = 'Sem medição';
+                if (lote.medido_em) {
+                  textoMedicao = `Medido em ${formatarData(lote.medido_em)}`;
+                } else if (lote.previsao_medicao) {
+                  textoMedicao = `Medição prevista ${formatarData(lote.previsao_medicao)}`;
+                }
+                const textoQtd = lote.quantidade != null ? ` • ${lote.quantidade} peças` : '';
 
                 return (
                   <div
                     key={lote.id}
-                    className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-2xs space-y-3.5"
+                    className={`rounded-xl border ${cardCorClass} p-4 sm:p-5 shadow-2xs space-y-3.5 transition-colors`}
                   >
-                    {/* Linha superior: Tipo, Descrição, Quantidade e Status */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-extrabold text-base text-foreground">
-                          {tipoLegivel}
+                    {/* Linha 1: "<nª medição> · <Tipo> · <descrição>" + badge de status */}
+                    <div className="flex items-center justify-between gap-2.5">
+                      <span className="font-extrabold text-base text-foreground truncate">
+                        {tituloLote}
+                      </span>
+                      <Badge
+                        variant={
+                          lote.status === 'entregue'
+                            ? 'default'
+                            : lote.status === 'produzido'
+                            ? 'secondary'
+                            : 'outline'
+                        }
+                        className="text-xs font-bold shrink-0"
+                      >
+                        {statusLegivel}
+                      </Badge>
+                    </div>
+
+                    {/* Linha 2: "Medido em dd/mm/aaaa" + quantidade */}
+                    <div className="text-sm font-medium text-foreground">
+                      {textoMedicao}{textoQtd}
+                    </div>
+
+                    {/* Linha 3: "Prazo Prado: dd/mm/aaaa (<prazo_dias> dias)" e férias */}
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                      <span>
+                        Prazo Prado: {formatarData(lote.previsao_entrega)}
+                        {lote.prazo_dias ? ` (${lote.prazo_dias} dias)` : ''}
+                      </span>
+                      {lote.acrescimo_ferias_dias > 0 && (
+                        <span className="text-amber-600 dark:text-amber-400 font-medium">
+                          +{lote.acrescimo_ferias_dias} dias férias
                         </span>
-                        {lote.descricao && (
-                          <span className="text-xs text-muted-foreground font-medium bg-accent/40 px-2 py-0.5 rounded">
-                            {lote.descricao}
-                          </span>
-                        )}
-                        {lote.quantidade && (
-                          <Badge variant="outline" className="text-xs">
-                            {lote.quantidade} peças
-                          </Badge>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={
-                            lote.status === 'entregue'
-                              ? 'default'
-                              : lote.status === 'produzido'
-                              ? 'secondary'
-                              : 'outline'
-                          }
-                          className="text-xs font-bold"
-                        >
-                          {statusLegivel}
-                        </Badge>
-
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => abrirEditarLote(lote)}
-                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
-                        >
-                          <Edit2 className="h-3 w-3" />
-                          Editar
-                        </Button>
-                      </div>
+                      )}
+                      {!temDataCombinada && !isEntregue && (
+                        <span className="text-muted-foreground/70 italic">
+                          • Sem data combinada
+                        </span>
+                      )}
                     </div>
 
-                    {/* Grade de Informações de Prazos e Medições */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs bg-accent/20 rounded-lg p-3">
-                      <div>
-                        <span className="text-muted-foreground block text-[11px]">Previsão Medição:</span>
-                        <strong className="text-foreground">
-                          {formatarData(lote.previsao_medicao)}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <span className="text-muted-foreground block text-[11px]">Medido em:</span>
-                        <strong className="text-foreground">
-                          {lote.medido_em ? formatarData(lote.medido_em) : 'Não medido'}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <span className="text-muted-foreground block text-[11px]">Prazo Produção:</span>
-                        <strong className="text-foreground">
-                          {lote.prazo_dias ? `${lote.prazo_dias} dias` : '—'}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <span className="text-muted-foreground block text-[11px]">Previsão Entrega:</span>
-                        <div className="flex flex-col">
-                          <span className={`inline-block px-1.5 py-0.5 rounded border text-xs ${prazoBadgeClass}`}>
-                            {formatarData(dataEntregaRef)}
-                          </span>
-                          {lote.acrescimo_ferias_dias > 0 && (
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5">
-                              +{lote.acrescimo_ferias_dias} dias férias
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Detalhe de Confirmação ou Entrega (lote sem entregas parciais) */}
-                    {!temEntregas && (lote.data_confirmada || lote.entregue_em) && (
-                      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-                        {lote.data_confirmada && (
-                          <span>
-                            Data confirmada: <strong className="text-foreground">{formatarData(lote.data_confirmada)}</strong>
-                          </span>
-                        )}
-                        {lote.entregue_em && (
-                          <span>
-                            Entregue em: <strong className="text-foreground">{formatarData(lote.entregue_em)}</strong>
-                            {lote.responsavel_recebimento && ` (recebido por ${lote.responsavel_recebimento})`}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Seção Entregas */}
+                    {/* Bloco Entregas */}
                     <div className="rounded-lg border border-border bg-accent/15 p-3.5 space-y-3">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Truck className="h-4 w-4 text-primary shrink-0" />
                           <span className="font-bold text-xs uppercase tracking-wider text-foreground">
-                            Entregas {temEntregas ? `(${totalEntregas})` : ''}
+                            Entregas
                           </span>
-                          {temEntregas && (
+                          {totalEntregas > 0 && (
                             <span className="text-xs text-muted-foreground font-medium">
                               • {resumoTexto}
                             </span>
@@ -922,133 +882,125 @@ function FichaObraPage() {
                         </Button>
                       </div>
 
-                      {entregas.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic">
-                          Nenhuma entrega parcial cadastrada (entrega única). Clique em "+ Entrega" para dividir o lote em remessas.
-                        </p>
+                      {totalEntregas === 0 ? (
+                        <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-center">
+                          <p className="text-xs text-muted-foreground">
+                            Nenhuma entrega combinada. Clique em + Entrega.
+                          </p>
+                        </div>
                       ) : (
-                        <div className="divide-y divide-border/50 rounded-md border border-border/60 bg-background/60 overflow-hidden">
-                          {entregas.map((ent: Entrega) => {
-                            const entEntregue = !!ent.entregue_em;
-                            return (
-                              <div
-                                key={ent.id}
-                                className="p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs hover:bg-accent/20 transition-colors"
-                              >
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-bold text-foreground">
-                                      Entrega {ent.numero}
-                                    </span>
-                                    {ent.quantidade != null && (
-                                      <Badge variant="outline" className="text-[11px] font-semibold">
-                                        {ent.quantidade} peças
-                                      </Badge>
-                                    )}
-                                    {entEntregue ? (
-                                      <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] font-bold">
-                                        Entregue
-                                      </Badge>
-                                    ) : (
-                                      <Badge variant="secondary" className="text-[10px]">
-                                        Pendente
-                                      </Badge>
-                                    )}
-                                  </div>
-
-                                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-[11px]">
-                                    {ent.previsao && (
-                                      <span>
-                                        Previsão: <strong className="text-foreground">{formatarData(ent.previsao)}</strong>
-                                      </span>
-                                    )}
-                                    {ent.data_confirmada && (
-                                      <span>
-                                        Confirmada: <strong className="text-foreground">{formatarData(ent.data_confirmada)}</strong>
-                                      </span>
-                                    )}
-                                    {ent.entregue_em && (
-                                      <span>
-                                        Entregue em: <strong className="text-foreground">{formatarData(ent.entregue_em)}</strong>
-                                      </span>
-                                    )}
-                                    {ent.responsavel_recebimento && (
-                                      <span>
-                                        Recebido por: <strong className="text-foreground">{ent.responsavel_recebimento}</strong>
-                                      </span>
-                                    )}
-                                    {ent.observacao && (
-                                      <span className="italic text-muted-foreground">
-                                        Obs: {ent.observacao}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-1.5 self-end md:self-auto shrink-0">
-                                  {!entEntregue && (
-                                    <>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        onClick={() => abrirRegistrarEntrega(lote, ent)}
-                                        className="h-7 px-2.5 text-xs font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                                      >
-                                        <Check className="h-3 w-3" />
-                                        Registrar entrega
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => abrirEditarEntrega(lote, ent)}
-                                        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
-                                      >
-                                        <Edit2 className="h-3 w-3" />
-                                        Editar
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setEntregaParaExcluir(ent)}
-                                        className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 gap-1"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                        Excluir
-                                      </Button>
-                                    </>
-                                  )}
-
-                                  {entEntregue && (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => abrirEditarEntrega(lote, ent)}
-                                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
-                                    >
-                                      <Edit2 className="h-3 w-3" />
-                                      Editar
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
+                        <div className="overflow-x-auto rounded-md border border-border/70 bg-background/60">
+                          <table className="w-full text-xs text-left">
+                            <thead>
+                              <tr className="border-b border-border/60 bg-muted/40 text-[11px] font-semibold text-muted-foreground">
+                                <th className="py-2 px-3">Entrega</th>
+                                <th className="py-2 px-3">Quantidade</th>
+                                <th className="py-2 px-3">Data combinada</th>
+                                <th className="py-2 px-3">Entregue em</th>
+                                <th className="py-2 px-3">Recebido por</th>
+                                <th className="py-2 px-3 text-right">Ações</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/40">
+                              {entregas.map((ent: Entrega) => {
+                                const entEntregue = !!ent.entregue_em;
+                                return (
+                                  <tr key={ent.id} className="hover:bg-accent/15 transition-colors">
+                                    <td className="py-2 px-3 font-semibold text-foreground whitespace-nowrap">
+                                      <div className="flex items-center gap-1.5">
+                                        <span>Entrega {ent.numero}</span>
+                                        {entEntregue ? (
+                                          <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] h-4 px-1.5 font-bold">
+                                            Entregue
+                                          </Badge>
+                                        ) : (
+                                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                                            Pendente
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      {ent.observacao && (
+                                        <p
+                                          className="text-[10px] text-muted-foreground italic truncate max-w-[180px] font-normal"
+                                          title={ent.observacao}
+                                        >
+                                          {ent.observacao}
+                                        </p>
+                                      )}
+                                    </td>
+                                    <td className="py-2 px-3 whitespace-nowrap">
+                                      {ent.quantidade != null ? `${ent.quantidade} peças` : '—'}
+                                    </td>
+                                    <td className="py-2 px-3 whitespace-nowrap font-medium text-foreground">
+                                      {ent.previsao ? formatarData(ent.previsao) : '—'}
+                                    </td>
+                                    <td className="py-2 px-3 whitespace-nowrap">
+                                      {ent.entregue_em ? formatarData(ent.entregue_em) : '—'}
+                                    </td>
+                                    <td className="py-2 px-3 whitespace-nowrap">
+                                      {ent.responsavel_recebimento || '—'}
+                                    </td>
+                                    <td className="py-2 px-3 text-right whitespace-nowrap">
+                                      <div className="flex items-center justify-end gap-1">
+                                        {!entEntregue ? (
+                                          <>
+                                            <Button
+                                              type="button"
+                                              size="sm"
+                                              onClick={() => abrirRegistrarEntrega(lote, ent)}
+                                              className="h-6 px-2 text-[11px] font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                              title="Registrar entrega"
+                                            >
+                                              <Check className="h-3 w-3" />
+                                              Registrar
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => abrirEditarEntrega(lote, ent)}
+                                              className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                                              title="Editar entrega"
+                                            >
+                                              <Edit2 className="h-3 w-3" />
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => setEntregaParaExcluir(ent)}
+                                              className="h-6 px-1.5 text-[11px] text-destructive hover:bg-destructive/10"
+                                              title="Excluir entrega"
+                                            >
+                                              <Trash2 className="h-3 w-3" />
+                                            </Button>
+                                          </>
+                                        ) : (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => abrirEditarEntrega(lote, ent)}
+                                            className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                                            title="Editar entrega"
+                                          >
+                                            <Edit2 className="h-3 w-3" />
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
                       )}
                     </div>
 
-                    {/* Ação principal por etapa */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60">
-                      <div className="text-[11px] text-muted-foreground">
-                        Etapa:{' '}
-                        <strong className="text-foreground">{statusLegivel}</strong>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        {/* Ações específicas por etapa */}
+                    {/* Rodapé: Um botão de ação principal e o botão "Editar". Nada mais. */}
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/50">
+                      <div>
                         {lote.status === 'aguardando_cadastro' && (
                           <Button
                             size="sm"
@@ -1083,52 +1035,26 @@ function FichaObraPage() {
                         )}
 
                         {['medido', 'pcp', 'em_producao'].includes(lote.status) && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => abrirAcaoEtapa('atualizar_producao', lote)}
-                              className="h-8 text-xs font-semibold gap-1.5"
-                            >
-                              <Factory className="h-3.5 w-3.5" />
-                              Atualizar produção
-                            </Button>
-                            {temEntregas ? (
-                              proximaEntregaPendente && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
-                                  className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                                >
-                                  <Truck className="h-3.5 w-3.5" />
-                                  Registrar próxima entrega
-                                </Button>
-                              )
-                            ) : (
-                              <Button
-                                size="sm"
-                                onClick={() => abrirAcaoEtapa('confirmar_entrega', lote)}
-                                className="h-8 text-xs font-semibold gap-1.5"
-                              >
-                                <Calendar className="h-3.5 w-3.5" />
-                                Confirmar data de entrega
-                              </Button>
-                            )}
-                          </>
+                          <Button
+                            size="sm"
+                            onClick={() => abrirAcaoEtapa('atualizar_producao', lote)}
+                            className="h-8 text-xs font-semibold gap-1.5"
+                          >
+                            <Factory className="h-3.5 w-3.5" />
+                            Atualizar produção
+                          </Button>
                         )}
 
                         {lote.status === 'produzido' && (
-                          temEntregas ? (
-                            proximaEntregaPendente && (
-                              <Button
-                                size="sm"
-                                onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
-                                className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                              >
-                                <Truck className="h-3.5 w-3.5" />
-                                Registrar próxima entrega
-                              </Button>
-                            )
+                          totalEntregas > 0 && proximaEntregaPendente ? (
+                            <Button
+                              size="sm"
+                              onClick={() => abrirRegistrarEntrega(lote, proximaEntregaPendente)}
+                              className="h-8 text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                              <Truck className="h-3.5 w-3.5" />
+                              Registrar entrega
+                            </Button>
                           ) : (
                             <Button
                               size="sm"
@@ -1142,21 +1068,23 @@ function FichaObraPage() {
                         )}
 
                         {lote.status === 'entregue' && (
-                          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
                             <CheckCircle2 className="h-4 w-4" />
                             Lote Entregue
                           </span>
                         )}
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => abrirRegistrarNota(lote.id)}
-                          className="h-8 text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          + Nota
-                        </Button>
                       </div>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => abrirEditarLote(lote)}
+                        className="h-8 px-3 text-xs font-semibold gap-1.5"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                        Editar
+                      </Button>
                     </div>
                   </div>
                 );
@@ -1452,10 +1380,10 @@ function FichaObraPage() {
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => handleAbrirArquivo(arq.id)}
+                                onClick={() => handleVerArquivo(arq)}
                                 className="h-6 px-1.5 text-[11px] text-primary hover:underline font-semibold ml-1"
                               >
-                                Abrir
+                                Ver
                               </Button>
                             </div>
                           ))}
@@ -1541,11 +1469,10 @@ function FichaObraPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleAbrirArquivo(arq.id)}
+                          onClick={() => handleVerArquivo(arq)}
                           className="h-8 text-xs font-semibold gap-1.5"
                         >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          Abrir
+                          Ver
                         </Button>
                         <Button
                           variant="ghost"
@@ -1782,6 +1709,15 @@ function FichaObraPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Visualizador de Arquivo Interno */}
+      <VisualizadorArquivo
+        open={!!arquivoVisualizando}
+        onOpenChange={(open) => {
+          if (!open) setArquivoVisualizando(null);
+        }}
+        arquivo={arquivoVisualizando}
+      />
     </main>
   );
 }

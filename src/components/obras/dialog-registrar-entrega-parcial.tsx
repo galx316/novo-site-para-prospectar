@@ -42,7 +42,8 @@ export function DialogRegistrarEntregaParcial({
 
   useEffect(() => {
     if (open) {
-      setDataEntrega(obterHojeSP());
+      const hoje = obterHojeSP();
+      setDataEntrega(hoje);
       setResponsavelRecebimento('');
       setRecebimentoConfirmado(true);
     }
@@ -67,7 +68,7 @@ export function DialogRegistrarEntregaParcial({
           entregaId: entrega.id,
           entregue_em: dataEntrega,
           responsavel_recebimento: responsavelRecebimento.trim() || null,
-          recebimento_confirmado: recebimentoConfirmado,
+          recebimento_confirmado: Boolean(dataEntrega),
         },
       });
 
@@ -110,7 +111,10 @@ export function DialogRegistrarEntregaParcial({
               id="reg-data-ent"
               type="date"
               value={dataEntrega}
-              onChange={(e) => setDataEntrega(e.target.value)}
+              onChange={(e) => {
+                setDataEntrega(e.target.value);
+                setRecebimentoConfirmado(Boolean(e.target.value));
+              }}
               disabled={salvando}
               className="h-9"
               required
@@ -139,7 +143,7 @@ export function DialogRegistrarEntregaParcial({
               disabled={salvando}
             />
             <label htmlFor="reg-rec-conf" className="text-xs font-semibold text-foreground cursor-pointer">
-              Recebimento confirmado
+              Recebimento confirmado (marcado automaticamente com data)
             </label>
           </div>
 

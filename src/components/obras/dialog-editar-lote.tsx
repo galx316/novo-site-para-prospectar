@@ -483,6 +483,23 @@ export function DialogEditarLote({
             </p>
           </div>
 
+          {/* Prazo Prado (referência) */}
+          <div className="space-y-1.5 pt-1 border-t border-border/60">
+            <label className="text-xs font-semibold text-foreground">
+              Prazo Prado (referência)
+            </label>
+            <Input
+              type="text"
+              value={lote.previsao_entrega ? `${formatarData(lote.previsao_entrega)}${lote.prazo_dias ? ` (${lote.prazo_dias} dias)` : ''}` : 'Calculado após medição do lote'}
+              disabled
+              readOnly
+              className="h-9 bg-muted/50 cursor-not-allowed text-xs text-muted-foreground font-medium"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Prazo contratual padrão calculado a partir da medição do lote.
+            </p>
+          </div>
+
           {/* Entrega */}
           {Array.isArray(lote.entregas) && lote.entregas.length > 0 ? (
             <div className="rounded-lg border border-border bg-accent/20 p-3 text-xs text-muted-foreground">
