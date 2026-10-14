@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useServerFn } from '@tanstack/react-start';
-import { editarLote, TIPOS_LOTE_LABELS, STATUS_LOTE_LABELS } from '@/lib/obras.functions';
+import {
+  editarLote,
+  excluirLote,
+  TIPOS_LOTE_LABELS,
+  STATUS_LOTE_LABELS,
+  type TipoLote,
+} from '@/lib/obras.functions';
 import type { Database } from '@/integrations/supabase/types';
 import {
   Dialog,
@@ -20,10 +26,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Edit2, Loader2, AlertCircle } from 'lucide-react';
+import { Edit2, Loader2, AlertCircle, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 type StatusLote = Database['public']['Enums']['status_lote'];
+
+const TIPOS_LOTE_OPCOES: { valor: TipoLote; rotulo: string }[] = [
+  { valor: 'contramarco', rotulo: 'Contramarco' },
+  { valor: 'apto_modelo', rotulo: 'Apto modelo' },
+  { valor: 'andar_tipo', rotulo: 'Andar tipo' },
+  { valor: 'area_comum', rotulo: 'Área comum' },
+  { valor: 'especiais', rotulo: 'Especiais' },
+  { valor: 'reposicao', rotulo: 'Reposição' },
+];
 
 interface DialogEditarLoteProps {
   open: boolean;
@@ -40,6 +55,7 @@ export function DialogEditarLote({
   obraId,
   onSuccess,
 }: DialogEditarLoteProps) {
+  const [tipo, setTipo] = useState<TipoLote>('contramarco');
   const [descricao, setDescricao] = useState('');
   const [quantidade, setQuantidade] = useState<string>('');
   const [cadastroCompleto, setCadastroCompleto] = useState(false);
@@ -51,11 +67,15 @@ export function DialogEditarLote({
   const [responsavelRecebimento, setResponsavelRecebimento] = useState('');
   const [entregueEm, setEntregueEm] = useState('');
   const [salvando, setSalvando] = useState(false);
+  const [confirmarExcluir, setConfirmarExcluir] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   const executarEditarLote = useServerFn(editarLote);
+  const executarExcluirLote = useServerFn(excluirLote);
 
   useEffect(() => {
     if (lote) {
+      setTipo(lote.tipo || 'contramarco');
       setDescricao(lote.descricao || '');
       setQuantidade(lote.quantidade ? String(lote.quantidade) : '');
       setCadastroCompleto(!!lote.cadastro_completo);
@@ -66,12 +86,11 @@ export function DialogEditarLote({
       setRecebimentoConfirmado(!!lote.recebimento_confirmado);
       setResponsavelRecebimento(lote.responsavel_recebimento || '');
       setEntregueEm(lote.entregue_em ? lote.entregue_em.slice(0, 10) : '');
+      setConfirmarExcluir(false);
     }
   }, [lote, open]);
 
   if (!lote) return null;
-
-  const tipoLegivel = TIPOS_LOTE_LABELS[lote.tipo as keyof typeof TIPOS_LOTE_LABELS] || lote.tipo;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -93,6 +112,7 @@ export function DialogEditarLote({
       const payload: any = {
         loteId: lote.id,
         obraId,
+        tipo,
         descricao: descricao.trim() || null,
         quantidade: isNaN(qtdNum as number) ? null : qtdNum,
         cadastro_completo: cadastroCompleto,
@@ -126,6 +146,28 @@ export function DialogEditarLote({
     }
   }
 
+  async function handleExcluirLote() {
+    if (!lote) return;
+    try {
+      setExcluindo(true);
+      await executarExcluirLote({
+        data: {
+          obraId,
+          loteId: lote.id,
+        },
+      });
+
+      toast.success('Lote excluído com sucesso.');
+      setConfirmarExcluir(false);
+      onOpenChange(false);
+      onSuccess();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao excluir lote.');
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
@@ -134,41 +176,67 @@ export function DialogEditarLote({
             <Edit2 className="h-5 w-5" />
             <span className="text-xs font-bold uppercase tracking-wider">Edição de Lote</span>
           </div>
-          <DialogTitle className="text-xl font-bold">Lote: {tipoLegivel}</DialogTitle>
+          <DialogTitle className="text-xl font-bold">
+            Lote: {TIPOS_LOTE_LABELS[tipo] || lote.tipo}
+          </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            Ajuste os dados cadastrais, medições, produção ou confirmação de entrega do lote.
+            Ajuste o tipo, dados cadastrais, medições, produção ou confirmação de entrega do lote.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           {/* Dados gerais */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div className="space-y-1.5">
-              <label htmlFor="edit-desc" className="text-xs font-semibold text-foreground">
-                Descrição
+              <label htmlFor="edit-tipo" className="text-xs font-semibold text-foreground">
+                Tipo
               </label>
-              <Input
-                id="edit-desc"
-                value={descricao}
-                onChange={(e) => setDescricao(e.target.value)}
-                disabled={salvando}
-                className="h-9"
-              />
+              <Select
+                value={tipo}
+                onValueChange={(val) => setTipo(val as TipoLote)}
+                disabled={salvando || excluindo}
+              >
+                <SelectTrigger id="edit-tipo" className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIPOS_LOTE_OPCOES.map((opt) => (
+                    <SelectItem key={opt.valor} value={opt.valor}>
+                      {opt.rotulo}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="edit-qtd" className="text-xs font-semibold text-foreground">
-                Quantidade
-              </label>
-              <Input
-                id="edit-qtd"
-                type="number"
-                min="0"
-                value={quantidade}
-                onChange={(e) => setQuantidade(e.target.value)}
-                disabled={salvando}
-                className="h-9"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="edit-desc" className="text-xs font-semibold text-foreground">
+                  Descrição
+                </label>
+                <Input
+                  id="edit-desc"
+                  value={descricao}
+                  onChange={(e) => setDescricao(e.target.value)}
+                  disabled={salvando || excluindo}
+                  className="h-9"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="edit-qtd" className="text-xs font-semibold text-foreground">
+                  Quantidade
+                </label>
+                <Input
+                  id="edit-qtd"
+                  type="number"
+                  min="0"
+                  value={quantidade}
+                  onChange={(e) => setQuantidade(e.target.value)}
+                  disabled={salvando || excluindo}
+                  className="h-9"
+                />
+              </div>
             </div>
           </div>
 
@@ -184,7 +252,7 @@ export function DialogEditarLote({
               id="edit-cad-completo"
               checked={cadastroCompleto}
               onCheckedChange={(checked) => setCadastroCompleto(!!checked)}
-              disabled={salvando}
+              disabled={salvando || excluindo}
             />
           </div>
 
@@ -199,7 +267,7 @@ export function DialogEditarLote({
                 type="date"
                 value={previsaoMedicao}
                 onChange={(e) => setPrevisaoMedicao(e.target.value)}
-                disabled={salvando}
+                disabled={salvando || excluindo}
                 className="h-9"
               />
             </div>
@@ -213,7 +281,7 @@ export function DialogEditarLote({
                 type="date"
                 value={medidoEm}
                 onChange={(e) => setMedidoEm(e.target.value)}
-                disabled={salvando}
+                disabled={salvando || excluindo}
                 className="h-9"
               />
             </div>
@@ -224,7 +292,7 @@ export function DialogEditarLote({
             <label className="text-xs font-semibold text-foreground">
               Status de Produção (após medição)
             </label>
-            <Select value={status} onValueChange={setStatus} disabled={salvando}>
+            <Select value={status} onValueChange={setStatus} disabled={salvando || excluindo}>
               <SelectTrigger className="h-9">
                 <SelectValue />
               </SelectTrigger>
@@ -253,7 +321,7 @@ export function DialogEditarLote({
                 type="date"
                 value={dataConfirmada}
                 onChange={(e) => setDataConfirmada(e.target.value)}
-                disabled={salvando}
+                disabled={salvando || excluindo}
                 className="h-9"
               />
             </div>
@@ -267,7 +335,7 @@ export function DialogEditarLote({
                 type="date"
                 value={entregueEm}
                 onChange={(e) => setEntregueEm(e.target.value)}
-                disabled={salvando}
+                disabled={salvando || excluindo}
                 className="h-9"
               />
             </div>
@@ -283,7 +351,7 @@ export function DialogEditarLote({
                 placeholder="Ex: Engenheiro Carlos"
                 value={responsavelRecebimento}
                 onChange={(e) => setResponsavelRecebimento(e.target.value)}
-                disabled={salvando}
+                disabled={salvando || excluindo}
                 className="h-9"
               />
             </div>
@@ -293,7 +361,7 @@ export function DialogEditarLote({
                 id="edit-rec-conf"
                 checked={recebimentoConfirmado}
                 onCheckedChange={(checked) => setRecebimentoConfirmado(!!checked)}
-                disabled={salvando}
+                disabled={salvando || excluindo}
               />
               <label htmlFor="edit-rec-conf" className="text-xs font-semibold text-foreground cursor-pointer">
                 Recebimento confirmado
@@ -301,25 +369,93 @@ export function DialogEditarLote({
             </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-border/60">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={salvando}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={salvando} className="gap-2 font-semibold">
-              {salvando ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Salvando...
-                </>
-              ) : (
-                'Salvar Alterações'
+          {/* Confirmação de exclusão em tela */}
+          {confirmarExcluir && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3.5 space-y-3 animate-in fade-in-50 duration-200">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-destructive">
+                    Confirma a exclusão deste lote?
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Esta ação apagará permanentemente este lote, incluindo follow-ups e registros associados. Não é possível desfazer.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={excluindo}
+                  onClick={() => setConfirmarExcluir(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={excluindo}
+                  onClick={handleExcluirLote}
+                  className="gap-1.5 font-semibold"
+                >
+                  {excluindo ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Excluindo...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Confirmar exclusão
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-3 border-t border-border/60">
+            <div>
+              {!confirmarExcluir && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={salvando || excluindo}
+                  onClick={() => setConfirmarExcluir(true)}
+                  className="w-full sm:w-auto gap-1.5 font-semibold"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Excluir lote
+                </Button>
               )}
-            </Button>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={salvando || excluindo}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={salvando || excluindo}
+                className="gap-2 font-semibold"
+              >
+                {salvando ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  'Salvar Alterações'
+                )}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

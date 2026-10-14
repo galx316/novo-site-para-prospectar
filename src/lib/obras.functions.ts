@@ -3,7 +3,7 @@ import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import type { Database } from '@/integrations/supabase/types';
 import { formatarData, obterHojeSP } from '@/lib/date-utils';
 
-type TipoLote = Database['public']['Enums']['tipo_lote'];
+export type TipoLote = Database['public']['Enums']['tipo_lote'];
 type StatusLote = Database['public']['Enums']['status_lote'];
 type TipoRegistro = Database['public']['Enums']['tipo_registro'];
 
@@ -463,6 +463,7 @@ export const editarLote = createServerFn({ method: 'POST' })
   .validator((data: {
     loteId: string;
     obraId?: string | undefined;
+    tipo?: TipoLote | undefined;
     descricao?: string | null | undefined;
     quantidade?: number | null | undefined;
     cadastro_completo?: boolean | undefined;
@@ -544,6 +545,42 @@ export const editarLote = createServerFn({ method: 'POST' })
     if (data.responsavel_recebimento !== undefined) updates.responsavel_recebimento = data.responsavel_recebimento?.trim() || null;
     if (data.entregue_em !== undefined) updates.entregue_em = data.entregue_em || null;
 
+    // Regra de alteração de tipo de lote:
+    // Se o tipo mudar e o lote não estiver entregue:
+    // a) busque configuracoes (id = 1) e pegue prazos[<novo tipo>].
+    // b) no mesmo update, grave tipo = novo tipo e prazo_dias = esse prazo.
+    // Se o lote já estiver entregue: mude só o tipo, sem mexer em prazo_dias.
+    const tipoMudou = data.tipo !== undefined && data.tipo !== loteAtual.tipo;
+    if (tipoMudou) {
+      const loteEntregue = Boolean(novoEntregueEm);
+      if (!loteEntregue) {
+        const { data: config, error: configErr } = await supabase
+          .from('configuracoes')
+          .select('prazos')
+          .eq('id', 1)
+          .single();
+
+        if (configErr || !config) {
+          throw new Error(configErr?.message || 'Configurações não encontradas.');
+        }
+
+        const prazos = (config.prazos as Record<string, any>) || {};
+        const novoPrazoRaw = prazos[data.tipo!];
+        if (novoPrazoRaw === undefined || novoPrazoRaw === null) {
+          throw new Error(`Prazo não configurado para o tipo de lote "${data.tipo}".`);
+        }
+        const novoPrazo = parseInt(String(novoPrazoRaw), 10);
+        if (isNaN(novoPrazo)) {
+          throw new Error(`Prazo inválido configurado para o tipo de lote "${data.tipo}".`);
+        }
+
+        updates.tipo = data.tipo;
+        updates.prazo_dias = novoPrazo;
+      } else {
+        updates.tipo = data.tipo;
+      }
+    }
+
     const { data: loteAtualizado, error: updErr } = await supabase
       .from('lotes')
       .update(updates)
@@ -553,8 +590,22 @@ export const editarLote = createServerFn({ method: 'POST' })
 
     if (updErr || !loteAtualizado) throw new Error(updErr?.message || 'Erro ao atualizar lote.');
 
-    // 4. Se medido_em, entregue_em ou status mudarem, gravar registro tipo 'nota'
-    const tipoLegivel = TIPOS_LOTE_LABELS[loteAtualizado.tipo] || loteAtualizado.tipo;
+    // 4. Se medido_em, entregue_em, status ou tipo mudarem, gravar registro tipo 'nota'
+    const tipoLegivel = TIPOS_LOTE_LABELS[loteAtualizado.tipo as TipoLote] || loteAtualizado.tipo;
+
+    if (tipoMudou) {
+      const tipoAntes = TIPOS_LOTE_LABELS[loteAtual.tipo as TipoLote] || loteAtual.tipo;
+      const tipoDepois = TIPOS_LOTE_LABELS[loteAtualizado.tipo as TipoLote] || loteAtualizado.tipo;
+      const { error: rErr } = await supabase.from('registros').insert({
+        obra_id: loteAtualizado.obra_id,
+        lote_id: loteAtualizado.id,
+        cliente_id: obra.cliente_id,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: `Lote: tipo alterado de ${tipoAntes} para ${tipoDepois}`,
+      });
+      if (rErr) throw new Error(rErr.message);
+    }
 
     if (loteAtual.medido_em !== loteAtualizado.medido_em) {
       const msg = loteAtualizado.medido_em
@@ -590,7 +641,7 @@ export const editarLote = createServerFn({ method: 'POST' })
     }
 
     if (data.status !== undefined && data.status !== loteAtual.status) {
-      const statusNome = STATUS_LOTE_LABELS[loteAtualizado.status] || loteAtualizado.status;
+      const statusNome = STATUS_LOTE_LABELS[loteAtualizado.status as StatusLote] || loteAtualizado.status;
       const msg = `Lote ${tipoLegivel}: status alterado para ${statusNome}`;
       const { error: rErr } = await supabase.from('registros').insert({
         obra_id: loteAtualizado.obra_id,
@@ -604,6 +655,99 @@ export const editarLote = createServerFn({ method: 'POST' })
     }
 
     return { lote: loteAtualizado };
+  });
+
+/**
+ * Excluir lote criado por engano.
+ */
+export const excluirLote = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    obraId: string;
+    loteId: string;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.obraId) throw new Error('ID da obra não informado.');
+    if (!data.loteId) throw new Error('ID do lote não informado.');
+
+    // a) confira que o lote é desta obra.
+    const { data: lote, error: loteErr } = await supabase
+      .from('lotes')
+      .select('*')
+      .eq('id', data.loteId)
+      .single();
+
+    if (loteErr || !lote) throw new Error(loteErr?.message || 'Lote não encontrado.');
+    if (lote.obra_id !== data.obraId) {
+      throw new Error('O lote não pertence à obra informada.');
+    }
+
+    // Buscar obra para obter cliente_id
+    const { data: obra, error: obraErr } = await supabase
+      .from('obras')
+      .select('id, cliente_id')
+      .eq('id', data.obraId)
+      .single();
+
+    if (obraErr || !obra) throw new Error(obraErr?.message || 'Obra não encontrada.');
+
+    // b) recuse se o lote tiver medido_em ou entregue_em preenchido. Mensagem: "Lote com medição ou entrega não pode ser excluído."
+    if (lote.medido_em || lote.entregue_em) {
+      throw new Error('Lote com medição ou entrega não pode ser excluído.');
+    }
+
+    // c) recuse se existir arquivo ligado ao lote (arquivos.lote_id). Mensagem: "Remova os arquivos do lote antes de excluir."
+    const { data: arquivos, error: arqErr } = await supabase
+      .from('arquivos')
+      .select('id')
+      .eq('lote_id', data.loteId)
+      .limit(1);
+
+    if (arqErr) throw new Error(arqErr.message);
+    if (arquivos && arquivos.length > 0) {
+      throw new Error('Remova os arquivos do lote antes de excluir.');
+    }
+
+    // d) apague nesta ordem: followups com lote_id = loteId, registros com lote_id = loteId, depois o lote. Confira o erro de cada delete.
+    const { error: delFollowErr } = await supabase
+      .from('followups')
+      .delete()
+      .eq('lote_id', data.loteId);
+
+    if (delFollowErr) throw new Error(delFollowErr.message);
+
+    const { error: delRegErr } = await supabase
+      .from('registros')
+      .delete()
+      .eq('lote_id', data.loteId);
+
+    if (delRegErr) throw new Error(delRegErr.message);
+
+    const { error: delLoteErr } = await supabase
+      .from('lotes')
+      .delete()
+      .eq('id', data.loteId);
+
+    if (delLoteErr) throw new Error(delLoteErr.message);
+
+    // e) grave registro tipo 'nota' na obra (sem lote_id): "Lote excluído: <tipo> <descricao>".
+    const tipoLegivel = TIPOS_LOTE_LABELS[lote.tipo as TipoLote] || lote.tipo;
+    const descTexto = lote.descricao?.trim() ? ` ${lote.descricao.trim()}` : '';
+    const { error: regErr } = await supabase.from('registros').insert({
+      obra_id: data.obraId,
+      cliente_id: obra.cliente_id,
+      lote_id: null,
+      tipo: 'nota',
+      direcao: 'nenhuma',
+      texto: `Lote excluído: ${tipoLegivel}${descTexto}`,
+    });
+
+    if (regErr) throw new Error(regErr.message);
+
+    return { success: true };
   });
 
 /**
