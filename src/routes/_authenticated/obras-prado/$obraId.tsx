@@ -14,6 +14,7 @@ import {
   TIPOS_LOTE_LABELS,
   STATUS_LOTE_LABELS,
   type Entrega,
+  type TipoLote,
 } from '@/lib/obras.functions';
 import {
   concluirFollowup,
@@ -49,7 +50,7 @@ import { DialogNotaObra } from '@/components/obras/dialog-nota-obra';
 import { DialogNovoLote } from '@/components/obras/dialog-novo-lote';
 import { DialogEditarLote } from '@/components/obras/dialog-editar-lote';
 import { DialogEditarObra } from '@/components/obras/dialog-editar-obra';
-import { DialogNovoFollowupObra } from '@/components/obras/dialog-novo-followup-obra';
+import { DialogNovoFollowupObra, type ModeloFollowup } from '@/components/obras/dialog-novo-followup-obra';
 import { DialogRemarcar } from '@/components/prospeccao/dialog-remarcar';
 import { DialogAcaoEtapaLote, type AcaoEtapaTipo } from '@/components/obras/dialog-acao-etapa-lote';
 import { DialogEnviarArquivos } from '@/components/obras/dialog-enviar-arquivos';
@@ -108,6 +109,7 @@ function FichaObraPage() {
 
   // Follow-ups da obra
   const [modalNovoFollowup, setModalNovoFollowup] = useState(false);
+  const [modeloFollowup, setModeloFollowup] = useState<ModeloFollowup>('livre');
   const [fupRemarcando, setFupRemarcando] = useState<any | null>(null);
 
   // Concluir Checklist com data
@@ -189,8 +191,22 @@ function FichaObraPage() {
     );
   }
 
+  const hoje = obterHojeSP();
   const algumLoteFeriasPendente = lotes.some((l: any) => !!l.ferias_pendente);
   const checklistConcluidos = checklist.filter((i: any) => !!i.feito).length;
+
+  const registrosMedicaoIds = new Set(
+    registros.filter((r: any) => r.tipo === 'medicao').map((r: any) => r.id)
+  );
+
+  const lotesMedidos = lotes
+    .filter((l: any) => !!l.medido_em)
+    .sort((a: any, b: any) => String(a.medido_em).localeCompare(String(b.medido_em)));
+  const lotesPrevistos = lotes
+    .filter((l: any) => !l.medido_em && !!l.previsao_medicao)
+    .sort((a: any, b: any) => String(a.previsao_medicao).localeCompare(String(b.previsao_medicao)));
+  const painelMedicoes = [...lotesMedidos, ...lotesPrevistos];
+  const lotesSemMedicao = lotes.filter((l: any) => !l.medido_em && !l.previsao_medicao);
 
   async function handleResolverProblema() {
     try {
@@ -564,6 +580,166 @@ function FichaObraPage() {
               Novo lote
             </Button>
           </div>
+
+          {/* Painel Medições no topo da aba Lotes */}
+          {lotes.length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-2xs space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                    <Layers className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Painel de Medições</h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      Cronograma e acompanhamento das medições por lote
+                    </p>
+                  </div>
+                </div>
+
+                {painelMedicoes.length > 0 && (
+                  <Badge variant="outline" className="text-xs font-semibold self-start sm:self-auto">
+                    {lotesMedidos.length} de {painelMedicoes.length} medições realizadas
+                  </Badge>
+                )}
+              </div>
+
+              {painelMedicoes.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic py-1">
+                  Nenhum lote possui data de medição (efetiva ou prevista) cadastrada.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {painelMedicoes.map((loteItem: any, index: number) => {
+                    const tipoLegivel =
+                      TIPOS_LOTE_LABELS[loteItem.tipo as TipoLote] || loteItem.tipo;
+                    const isMedido = !!loteItem.medido_em;
+                    const prevLimpa = loteItem.previsao_medicao ? loteItem.previsao_medicao.slice(0, 10) : '';
+                    const dataAtrasada = !isMedido && prevLimpa && prevLimpa < hoje;
+
+                    // Arquivos vinculados à medição deste lote
+                    const arqsMedicao = arquivos.filter(
+                      (arq: any) =>
+                        arq.lote_id === loteItem.id &&
+                        arq.registro_id &&
+                        registrosMedicaoIds.has(arq.registro_id)
+                    );
+
+                    return (
+                      <div
+                        key={loteItem.id}
+                        className={`p-3 rounded-lg border transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
+                          isMedido
+                            ? 'bg-emerald-500/5 border-emerald-500/20'
+                            : 'bg-background border-border/70'
+                        }`}
+                      >
+                        {/* 1. Nº e Tipo + Descrição */}
+                        <div className="flex items-center gap-2.5 min-w-[220px]">
+                          <Badge
+                            variant={isMedido ? 'default' : 'secondary'}
+                            className={`font-bold text-[11px] shrink-0 ${
+                              isMedido ? 'bg-emerald-600 hover:bg-emerald-600 text-white' : ''
+                            }`}
+                          >
+                            {index + 1}ª medição
+                          </Badge>
+                          <div className="font-semibold text-foreground">
+                            {tipoLegivel}
+                            {loteItem.descricao && (
+                              <span className="text-muted-foreground font-normal ml-1">
+                                ({loteItem.descricao})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 2. Status / Data */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isMedido ? (
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Medido em {formatarData(loteItem.medido_em)}
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center gap-1.5 font-semibold ${
+                                dataAtrasada
+                                  ? 'text-destructive'
+                                  : 'text-amber-600 dark:text-amber-400'
+                              }`}
+                            >
+                              {dataAtrasada ? (
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                              ) : (
+                                <Clock className="h-3.5 w-3.5" />
+                              )}
+                              Prevista para {formatarData(loteItem.previsao_medicao)}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 3. Quantidade */}
+                        <div className="text-muted-foreground shrink-0 font-medium text-[11px]">
+                          {loteItem.quantidade != null ? (
+                            <span>
+                              <strong className="text-foreground">{loteItem.quantidade}</strong> peças
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/60">—</span>
+                          )}
+                        </div>
+
+                        {/* 4. Anexos da Medição com Abrir */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {arqsMedicao.length > 0 ? (
+                            arqsMedicao.map((arq: any) => (
+                              <Button
+                                key={arq.id}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleAbrirArquivo(arq.id)}
+                                className="h-7 px-2.5 text-xs gap-1 border-border/80 hover:border-primary text-foreground"
+                                title={`Abrir ${arq.nome}`}
+                              >
+                                <Paperclip className="h-3.5 w-3.5 text-primary" />
+                                <span className="max-w-[130px] truncate">{arq.nome}</span>
+                                <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                              </Button>
+                            ))
+                          ) : (
+                            <span className="text-muted-foreground/50 text-[11px] italic flex items-center gap-1">
+                              <Paperclip className="h-3 w-3 opacity-40" />
+                              Sem arquivos
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Lotes sem data de medição */}
+              {lotesSemMedicao.length > 0 && (
+                <div className="pt-2.5 border-t border-border/40 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-muted-foreground/80">Sem data de medição:</span>
+                  {lotesSemMedicao.map((l: any) => {
+                    const tipoNome = TIPOS_LOTE_LABELS[l.tipo as TipoLote] || l.tipo;
+                    return (
+                      <span
+                        key={l.id}
+                        className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted/60 text-muted-foreground text-[11px]"
+                      >
+                        {tipoNome}{l.descricao ? ` (${l.descricao})` : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {lotes.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center space-y-3">
@@ -1060,7 +1236,22 @@ function FichaObraPage() {
                         </div>
                       </div>
 
-                      <div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {item.item.toLowerCase().includes('treinamento de instalação') && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setModeloFollowup('treinamento_instalacao');
+                              setModalNovoFollowup(true);
+                            }}
+                            className="h-7 px-2.5 text-xs font-semibold gap-1 text-primary border-primary/30 hover:bg-primary/10"
+                          >
+                            <Calendar className="h-3 w-3" />
+                            Agendar follow-up
+                          </Button>
+                        )}
                         {!isEditandoEstaNota && (
                           <Button
                             type="button"
@@ -1125,7 +1316,10 @@ function FichaObraPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setModalNovoFollowup(true)}
+                onClick={() => {
+                  setModeloFollowup('livre');
+                  setModalNovoFollowup(true);
+                }}
                 className="gap-1.5 text-xs font-semibold h-7 px-2.5 bg-card hover:bg-accent"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -1410,6 +1604,7 @@ function FichaObraPage() {
         onOpenChange={setModalNovoFollowup}
         obraId={obraId}
         lotes={lotes}
+        modeloInicial={modeloFollowup}
         onSuccess={() => refetch()}
       />
 
@@ -1485,6 +1680,7 @@ function FichaObraPage() {
         open={modalNovoLote}
         onOpenChange={setModalNovoLote}
         obraId={obraId}
+        lotes={lotes}
         onSuccess={() => refetch()}
       />
 
@@ -1492,6 +1688,7 @@ function FichaObraPage() {
         open={modalEditarLote}
         onOpenChange={setModalEditarLote}
         lote={loteEditando}
+        lotes={lotes}
         obraId={obraId}
         onSuccess={() => refetch()}
       />
@@ -1501,6 +1698,7 @@ function FichaObraPage() {
         onOpenChange={setModalAcaoEtapa}
         tipoAcao={tipoAcaoEtapa}
         lote={loteAcaoEtapa}
+        lotes={lotes}
         obraId={obraId}
         onSuccess={() => refetch()}
       />

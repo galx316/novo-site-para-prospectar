@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { useServerFn } from '@tanstack/react-start';
-import { criarLote, TIPOS_LOTE_LABELS } from '@/lib/obras.functions';
+import {
+  criarLote,
+  criarFollowupObra,
+  TIPOS_LOTE_LABELS,
+  type TipoLote,
+} from '@/lib/obras.functions';
+import { obterHojeSP, adicionarDiasSP, formatarData } from '@/lib/date-utils';
 import type { Database } from '@/integrations/supabase/types';
 import {
   Dialog,
@@ -12,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -19,15 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Package, Loader2 } from 'lucide-react';
+import { Package, Loader2, Bell } from 'lucide-react';
 import { toast } from 'sonner';
-
-type TipoLote = Database['public']['Enums']['tipo_lote'];
 
 interface DialogNovoLoteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   obraId: string;
+  lotes?: any[];
   onSuccess: () => void;
 }
 
@@ -40,23 +46,63 @@ const TIPOS_LOTE_OPCOES: { valor: TipoLote; rotulo: string }[] = [
   { valor: 'reposicao', rotulo: 'Reposição' },
 ];
 
+function calcularProximoNumeroMedicao(todosLotes: any[] = []): number {
+  const medidos = todosLotes
+    .filter((l) => !!l.medido_em)
+    .sort((a, b) => String(a.medido_em).localeCompare(String(b.medido_em)));
+  const previstos = todosLotes
+    .filter((l) => !l.medido_em && !!l.previsao_medicao)
+    .sort((a, b) => String(a.previsao_medicao).localeCompare(String(b.previsao_medicao)));
+  return medidos.length + previstos.length + 1;
+}
+
 export function DialogNovoLote({
   open,
   onOpenChange,
   obraId,
+  lotes = [],
   onSuccess,
 }: DialogNovoLoteProps) {
   const [tipo, setTipo] = useState<TipoLote>('contramarco');
   const [descricao, setDescricao] = useState('');
   const [quantidade, setQuantidade] = useState<string>('');
+  const [cadastroCompleto, setCadastroCompleto] = useState(false);
+  const [previsaoMedicao, setPrevisaoMedicao] = useState('');
+  const [medidoEm, setMedidoEm] = useState('');
   const [salvando, setSalvando] = useState(false);
 
+  // Lembrete
+  const [criarLembrete, setCriarLembrete] = useState(true);
+  const [dataLembrete, setDataLembrete] = useState('');
+  const [motivoLembrete, setMotivoLembrete] = useState('');
+
   const executarCriarLote = useServerFn(criarLote);
+  const executarCriarFollowup = useServerFn(criarFollowupObra);
+
+  function atualizarSugestaoLembrete(prevData: string, tipoAtual = tipo, descAtual = descricao) {
+    if (!prevData) return;
+    const hoje = obterHojeSP();
+    let d = adicionarDiasSP(-3, prevData);
+    if (d < hoje) d = hoje;
+    setDataLembrete(d);
+
+    const numMed = calcularProximoNumeroMedicao(lotes);
+    const ddmm = formatarData(prevData).slice(0, 5);
+    const tipoLegivel = TIPOS_LOTE_LABELS[tipoAtual] || tipoAtual;
+    const tipoDesc = `${tipoLegivel}${descAtual.trim() ? ` ${descAtual.trim()}` : ''}`;
+    setMotivoLembrete(`Confirmar com a obra a ${numMed}ª medição (${tipoDesc}) prevista para ${ddmm}`);
+  }
 
   function resetForm() {
     setTipo('contramarco');
     setDescricao('');
     setQuantidade('');
+    setCadastroCompleto(false);
+    setPrevisaoMedicao('');
+    setMedidoEm('');
+    setCriarLembrete(true);
+    setDataLembrete('');
+    setMotivoLembrete('');
     setSalvando(false);
   }
 
@@ -67,17 +113,41 @@ export function DialogNovoLote({
       return;
     }
 
+    if (medidoEm && !cadastroCompleto) {
+      toast.error('Complete o cadastro do lote antes da medição.');
+      return;
+    }
+
     try {
       setSalvando(true);
       const qtdNum = quantidade ? parseInt(quantidade, 10) : undefined;
-      await executarCriarLote({
+      const res = await executarCriarLote({
         data: {
           obraId,
           tipo,
           descricao: descricao.trim() || undefined,
           quantidade: isNaN(qtdNum as number) ? undefined : qtdNum,
+          cadastro_completo: cadastroCompleto,
+          previsao_medicao: previsaoMedicao || undefined,
+          medido_em: medidoEm || undefined,
         },
       });
+
+      // Se lembrete foi solicitado e há previsão de medição
+      if (criarLembrete && previsaoMedicao && dataLembrete && motivoLembrete.trim() && res?.lote?.id) {
+        try {
+          await executarCriarFollowup({
+            data: {
+              obraId,
+              loteId: res.lote.id,
+              data: dataLembrete,
+              motivo: motivoLembrete.trim(),
+            },
+          });
+        } catch (fupErr: any) {
+          toast.error(`Aviso: falha ao agendar lembrete: ${fupErr.message}`);
+        }
+      }
 
       toast.success('Lote criado com sucesso.');
       resetForm();
@@ -98,7 +168,7 @@ export function DialogNovoLote({
         onOpenChange(v);
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-2 text-primary mb-1">
             <Package className="h-5 w-5" />
@@ -113,7 +183,15 @@ export function DialogNovoLote({
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-foreground">Tipo de Lote *</label>
-            <Select value={tipo} onValueChange={(v) => setTipo(v as TipoLote)}>
+            <Select
+              value={tipo}
+              onValueChange={(v) => {
+                const novoTipo = v as TipoLote;
+                setTipo(novoTipo);
+                if (previsaoMedicao) atualizarSugestaoLembrete(previsaoMedicao, novoTipo);
+              }}
+              disabled={salvando}
+            >
               <SelectTrigger className="h-10">
                 <SelectValue />
               </SelectTrigger>
@@ -133,9 +211,12 @@ export function DialogNovoLote({
             </label>
             <Input
               id="desc-lote"
-              placeholder="Ex: Torre A - 1º ao 10º pavimentos"
+              placeholder="Ex.: Torre A, Peças faltantes do andar tipo, Guarita"
               value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
+              onChange={(e) => {
+                setDescricao(e.target.value);
+                if (previsaoMedicao) atualizarSugestaoLembrete(previsaoMedicao, tipo, e.target.value);
+              }}
               disabled={salvando}
               className="h-10"
             />
@@ -155,6 +236,114 @@ export function DialogNovoLote({
               disabled={salvando}
               className="h-10"
             />
+          </div>
+
+          {/* Cadastro Completo */}
+          <div className="rounded-lg border border-border bg-accent/30 p-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold text-foreground">Cadastro Completo</p>
+              <p className="text-[11px] text-muted-foreground">
+                Obrigatório para registrar a data de medição efetiva.
+              </p>
+            </div>
+            <Checkbox
+              id="novo-cad-completo"
+              checked={cadastroCompleto}
+              onCheckedChange={(checked) => setCadastroCompleto(!!checked)}
+              disabled={salvando}
+            />
+          </div>
+
+          {/* Datas de Medição */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="novo-prev-med" className="text-xs font-semibold text-foreground">
+                  Previsão de Medição
+                </label>
+                <Input
+                  id="novo-prev-med"
+                  type="date"
+                  value={previsaoMedicao}
+                  onChange={(e) => {
+                    setPrevisaoMedicao(e.target.value);
+                    if (e.target.value) {
+                      setCriarLembrete(true);
+                      atualizarSugestaoLembrete(e.target.value);
+                    }
+                  }}
+                  disabled={salvando}
+                  className="h-10"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="novo-med-em" className="text-xs font-semibold text-foreground">
+                  Medido em
+                </label>
+                <Input
+                  id="novo-med-em"
+                  type="date"
+                  value={medidoEm}
+                  onChange={(e) => setMedidoEm(e.target.value)}
+                  disabled={salvando}
+                  className="h-10"
+                />
+              </div>
+            </div>
+
+            {/* Lembrete ao prever medição */}
+            {previsaoMedicao && (
+              <div className="rounded-lg border border-border bg-accent/20 p-3 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="novo-chk-lembrete"
+                    checked={criarLembrete}
+                    onCheckedChange={(c) => setCriarLembrete(!!c)}
+                    disabled={salvando}
+                  />
+                  <label
+                    htmlFor="novo-chk-lembrete"
+                    className="text-xs font-semibold text-foreground flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Bell className="h-3.5 w-3.5 text-primary" />
+                    Criar lembrete
+                  </label>
+                </div>
+
+                {criarLembrete && (
+                  <div className="space-y-2 pl-6 pt-1">
+                    <div className="space-y-1">
+                      <label htmlFor="novo-data-lembrete" className="text-[11px] font-medium text-muted-foreground">
+                        Data do lembrete
+                      </label>
+                      <Input
+                        id="novo-data-lembrete"
+                        type="date"
+                        value={dataLembrete}
+                        onChange={(e) => setDataLembrete(e.target.value)}
+                        disabled={salvando}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label htmlFor="novo-motivo-lembrete" className="text-[11px] font-medium text-muted-foreground">
+                        Motivo do lembrete
+                      </label>
+                      <Input
+                        id="novo-motivo-lembrete"
+                        value={motivoLembrete}
+                        onChange={(e) => setMotivoLembrete(e.target.value)}
+                        disabled={salvando}
+                        placeholder="Motivo do follow-up"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0 pt-2">

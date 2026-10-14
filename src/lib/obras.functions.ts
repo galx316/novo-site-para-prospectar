@@ -417,6 +417,9 @@ export const criarLote = createServerFn({ method: 'POST' })
     tipo: TipoLote;
     descricao?: string | null | undefined;
     quantidade?: number | null | undefined;
+    cadastro_completo?: boolean | undefined;
+    previsao_medicao?: string | null | undefined;
+    medido_em?: string | null | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -424,6 +427,10 @@ export const criarLote = createServerFn({ method: 'POST' })
 
     if (!data.obraId) throw new Error('ID da obra não informado.');
     if (!data.tipo) throw new Error('Tipo de lote não informado.');
+
+    if (data.medido_em && !data.cadastro_completo) {
+      throw new Error('Complete o cadastro do lote antes da medição.');
+    }
 
     const { data: obra, error: obraErr } = await supabase
       .from('obras')
@@ -440,6 +447,9 @@ export const criarLote = createServerFn({ method: 'POST' })
         tipo: data.tipo,
         descricao: data.descricao?.trim() || null,
         quantidade: data.quantidade ?? null,
+        cadastro_completo: data.cadastro_completo ?? false,
+        previsao_medicao: data.previsao_medicao || null,
+        medido_em: data.medido_em || null,
       })
       .select()
       .single();
