@@ -48,6 +48,10 @@ interface DialogNovoProspectProps {
   onOpenChange: (open: boolean) => void;
   marcasDisponiveis: Marca[];
   onSuccess: () => void;
+  initialValues?: {
+    nomeContato?: string | undefined;
+    whatsapp?: string | undefined;
+  } | undefined;
 }
 
 export function DialogNovoProspect({
@@ -55,6 +59,7 @@ export function DialogNovoProspect({
   onOpenChange,
   marcasDisponiveis,
   onSuccess,
+  initialValues,
 }: DialogNovoProspectProps) {
   const navigate = useNavigate();
 
@@ -124,10 +129,10 @@ export function DialogNovoProspect({
       setUf('');
       setSituacaoPrado('nao_verificado');
       setRepresentantePrado('');
-      setNomeContato('');
+      setNomeContato(initialValues?.nomeContato || '');
       setCargoContato('');
       setTelefone('');
-      setWhatsapp('');
+      setWhatsapp(initialValues?.whatsapp || '');
       setEmail('');
 
       // Marcas ativas como opções de escolha
@@ -147,7 +152,7 @@ export function DialogNovoProspect({
       setCanalEnvio('whatsapp');
       setErroDuplicado(null);
     }
-  }, [open, marcasDisponiveis]);
+  }, [open, marcasDisponiveis, initialValues]);
 
   // Busca em tempo real enquanto digita a construtora
   function handleNomeConstrutoraChange(val: string) {

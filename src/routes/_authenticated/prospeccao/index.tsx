@@ -1,4 +1,4 @@
-import { useState, useDeferredValue } from 'react';
+import { useState, useEffect, useDeferredValue } from 'react';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -60,6 +60,33 @@ function ProspeccaoPage() {
 
   // Estados de modais
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
+  const [initialNovoValues, setInitialNovoValues] = useState<{
+    nomeContato?: string;
+    whatsapp?: string;
+  } | undefined>(undefined);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const novo = params.get('novo');
+    if (novo === '1' || novo === 'true') {
+      const wa = params.get('whatsapp') || '';
+      const nome = params.get('nome') || '';
+      setInitialNovoValues({
+        whatsapp: wa,
+        nomeContato: nome,
+      });
+      setModalNovoAberto(true);
+
+      // Limpar os parâmetros da URL mantendo o histórico limpo
+      const url = new URL(window.location.href);
+      url.searchParams.delete('novo');
+      url.searchParams.delete('whatsapp');
+      url.searchParams.delete('nome');
+      const novaUrl = url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : '');
+      window.history.replaceState({}, '', novaUrl);
+    }
+  }, []);
 
   const [modalEnvieiAberto, setModalEnvieiAberto] = useState(false);
   const [modalRespondeuAberto, setModalRespondeuAberto] = useState(false);
@@ -485,6 +512,7 @@ function ProspeccaoPage() {
         open={modalNovoAberto}
         onOpenChange={setModalNovoAberto}
         marcasDisponiveis={marcas}
+        initialValues={initialNovoValues}
         onSuccess={() => refetch()}
       />
 
