@@ -116,9 +116,23 @@ export function DialogVincular({
     setSalvando(true);
     try {
       if (salvarNumero && numeroConversa) {
+        // Salvar a variante de 13 dígitos (com o 9) quando ela existir
+        const d = numeroConversa.replace(/\D/g, '');
+        const comDDI = d.length === 10 || d.length === 11 ? '55' + d : d;
+        let numeroParaSalvar = numeroConversa;
+        if (comDDI.length === 13 && comDDI.startsWith('55') && comDDI[4] === '9') {
+          numeroParaSalvar = comDDI;
+        } else if (
+          comDDI.length === 12 &&
+          comDDI.startsWith('55') &&
+          ['6', '7', '8', '9'].includes(comDDI[4])
+        ) {
+          numeroParaSalvar = comDDI.slice(0, 4) + '9' + comDDI.slice(4);
+        }
+
         const { error: errUpd } = await supabase
           .from('contatos')
-          .update({ whatsapp: numeroConversa })
+          .update({ whatsapp: numeroParaSalvar })
           .eq('id', contatoId);
 
         if (errUpd) {
@@ -160,7 +174,15 @@ export function DialogVincular({
                 <strong>Salvar este número no contato?</strong>
                 <p>
                   O contato <strong>{contatoPendente.contatoNome}</strong> ({contatoPendente.clienteNome}) não possui WhatsApp cadastrado.
-                  Deseja salvar o número <strong>{numeroConversa}</strong>?
+                  Deseja salvar o número <strong>{(() => {
+                    const d = (numeroConversa || '').replace(/\D/g, '');
+                    const comDDI = d.length === 10 || d.length === 11 ? '55' + d : d;
+                    if (comDDI.length === 13 && comDDI.startsWith('55') && comDDI[4] === '9') return comDDI;
+                    if (comDDI.length === 12 && comDDI.startsWith('55') && ['6', '7', '8', '9'].includes(comDDI[4])) {
+                      return comDDI.slice(0, 4) + '9' + comDDI.slice(4);
+                    }
+                    return numeroConversa;
+                  })()}</strong>?
                 </p>
               </div>
 

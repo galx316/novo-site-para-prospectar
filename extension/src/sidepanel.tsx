@@ -9,6 +9,39 @@ import { NaoEncontradoView } from './components/NaoEncontradoView';
 import { DialogVincular } from './components/DialogVincular';
 import { ToastContainer, showToast } from './components/Toast';
 
+/**
+ * Gera variantes de número brasileiro (com e sem o 9º dígito após o DDD).
+ */
+export function variantesNumeroBR(numero?: string | null): string[] {
+  if (!numero) return [];
+  let d = numero.replace(/\D/g, '');
+  if (!d) return [numero];
+
+  // Se tiver 10 ou 11 dígitos, coloque "55" na frente
+  if (d.length === 10 || d.length === 11) {
+    d = '55' + d;
+  }
+
+  // Se tiver 13 dígitos, começar com "55" e o 5º dígito (primeiro depois do DDD) for "9":
+  // variantes = [o próprio, sem esse 9]
+  if (d.length === 13 && d.startsWith('55') && d[4] === '9') {
+    return [d, d.slice(0, 4) + d.slice(5)];
+  }
+
+  // Se tiver 12 dígitos, começar com "55" e o 5º dígito for 6, 7, 8 ou 9:
+  // variantes = [o próprio, com "9" inserido depois do DDD]
+  if (
+    d.length === 12 &&
+    d.startsWith('55') &&
+    ['6', '7', '8', '9'].includes(d[4])
+  ) {
+    return [d, d.slice(0, 4) + '9' + d.slice(4)];
+  }
+
+  // Senão: variantes = [o próprio]
+  return [d];
+}
+
 export function SidePanelApp() {
   const [verificandoAuth, setVerificandoAuth] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
@@ -60,19 +93,25 @@ export function SidePanelApp() {
         let followupPendenteObj: any = null;
         let oportunidadesList: any[] = [];
 
-        // a) Se houver número, chamar a RPC buscar_contato_por_whatsapp
+        // a) Se houver número, chamar a RPC buscar_contato_por_whatsapp para cada variante
         if (infoConversa.numero) {
-          const { data: rpcData, error: rpcErr } = await supabase.rpc(
-            'buscar_contato_por_whatsapp',
-            { p_numero: infoConversa.numero }
-          );
+          const variantes = variantesNumeroBR(infoConversa.numero);
+          for (const varNumero of variantes) {
+            const { data: rpcData, error: rpcErr } = await supabase.rpc(
+              'buscar_contato_por_whatsapp',
+              { p_numero: varNumero }
+            );
 
-          if (!rpcErr && rpcData && typeof rpcData === 'object') {
-            const parsed = rpcData as any;
-            contatoObj = parsed.contato;
-            clienteObj = parsed.cliente;
-            followupPendenteObj = parsed.followup_pendente;
-            oportunidadesList = parsed.oportunidades || [];
+            if (!rpcErr && rpcData && typeof rpcData === 'object') {
+              const parsed = rpcData as any;
+              if (parsed.contato) {
+                contatoObj = parsed.contato;
+                clienteObj = parsed.cliente;
+                followupPendenteObj = parsed.followup_pendente;
+                oportunidadesList = parsed.oportunidades || [];
+                break;
+              }
+            }
           }
         }
 
@@ -395,7 +434,11 @@ export function SidePanelApp() {
       {modalVincularAberto && conversa && (
         <DialogVincular
           tituloConversa={conversa.titulo || 'Conversa'}
-          numeroConversa={conversa.numero}
+          numeroConversa={
+            conversa.numero
+              ? (variantesNumeroBR(conversa.numero).find((v) => v.length === 13) || conversa.numero)
+              : null
+          }
           onClose={() => setModalVincularAberto(false)}
           onSuccess={() => {
             setModalVincularAberto(false);
