@@ -48,6 +48,7 @@ export function SidePanelApp() {
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
   const [autorizado, setAutorizado] = useState<boolean | null>(null);
   const [erroAuth, setErroAuth] = useState<string | null>(null);
+  const [erroLoop, setErroLoop] = useState<string | null>(null);
 
   const [estadoAba, setEstadoAba] = useState<
     'carregando' | 'nao_whatsapp' | 'precisa_recarregar' | 'sem_conversa' | 'ok'
@@ -62,6 +63,16 @@ export function SidePanelApp() {
   const [modalVincularAberto, setModalVincularAberto] = useState(false);
   const [atalhosDias, setAtalhosDias] = useState<number[]>([3, 7, 15, 30]);
   const [marcas, setMarcas] = useState<Marca[]>([]);
+
+  // Referências para evitar dependências instáveis e re-renders em cascata
+  const marcasRef = useRef<Marca[]>([]);
+  marcasRef.current = marcas;
+
+  const atalhosDiasRef = useRef<number[]>([3, 7, 15, 30]);
+  atalhosDiasRef.current = atalhosDias;
+
+  const metadadosCarregadosRef = useRef(false);
+  const chamadasAuthorizedRef = useRef<number[]>([]);
 
   // Referência para evitar concorrência de requisições de conversa
   const conversaAtualRef = useRef<ConversaInfo | null>(null);
@@ -79,9 +90,11 @@ export function SidePanelApp() {
 
           if (confRes.data?.atalhos_dias) {
             setAtalhosDias(confRes.data.atalhos_dias);
+            atalhosDiasRef.current = confRes.data.atalhos_dias;
           }
           if (marcasRes.data) {
             setMarcas(marcasRes.data);
+            marcasRef.current = marcasRes.data;
           }
         })(),
         10000,
@@ -92,9 +105,9 @@ export function SidePanelApp() {
     }
   }, []);
 
-  // 2. Buscar dados completos do contato no Supabase
+  // 2. Buscar dados completos do contato no Supabase (não depende de marcas)
   const buscarDadosContato = useCallback(
-    async (infoConversa: ConversaInfo, marcasLista: Marca[]) => {
+    async (infoConversa: ConversaInfo) => {
       if (!infoConversa.aberta || infoConversa.erro === 'nao_identificado') {
         setDadosContato(null);
         setCarregandoConversa(false);
@@ -180,6 +193,7 @@ export function SidePanelApp() {
 
             // Se encontrou o contato:
             if (contatoObj && clienteObj) {
+              const marcasLista = marcasRef.current;
               const marcasMap = new Map((marcasLista || []).map((m) => [m.id, m]));
 
               // Buscar todas as oportunidades abertas da CONSTRUTORA
@@ -252,7 +266,7 @@ export function SidePanelApp() {
     []
   );
 
-  // 3. Solicitar conversa ativa da aba aberta do WhatsApp
+  // 3. Solicitar conversa ativa da aba aberta do WhatsApp (deps estáveis)
   const checarAbaWhatsApp = useCallback(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const activeTab = tabs[0];
@@ -303,11 +317,11 @@ export function SidePanelApp() {
           // Conversa aberta
           setEstadoAba('ok');
           setConversa(resposta);
-          buscarDadosContato(resposta, marcas);
+          buscarDadosContato(resposta);
         }
       );
     });
-  }, [buscarDadosContato, marcas]);
+  }, [buscarDadosContato]);
 
   // Recarregar aba do WhatsApp exclusivamente sob clique do usuário
   function handleRecarregarWhatsApp() {
@@ -337,6 +351,16 @@ export function SidePanelApp() {
 
       setUsuarioEmail(session.user?.email || null);
 
+      // Trava contra laço: se chamado mais de 3 vezes em 10 segundos, para e avisa o usuário
+      const agora = Date.now();
+      const recentes = chamadasAuthorizedRef.current.filter((t) => agora - t < 10000);
+      if (recentes.length >= 3) {
+        console.error('Proteção contra laço acionada: is_authorized chamado mais de 3 vezes em 10s');
+        setErroLoop('Erro interno: muitas verificações. Feche e abra o painel.');
+        return;
+      }
+      chamadasAuthorizedRef.current = [...recentes, agora];
+
       // Chamar RPC is_authorized com limite de 10s
       const rpcResult = await comTimeout(
         supabase.rpc('is_authorized'),
@@ -349,8 +373,6 @@ export function SidePanelApp() {
         setAutorizado(false);
       } else {
         setAutorizado(true);
-        await carregarMetadados();
-        checarAbaWhatsApp();
       }
     } catch (e: any) {
       console.error('Erro na checagem de sessão:', e);
@@ -358,13 +380,27 @@ export function SidePanelApp() {
     } finally {
       setVerificandoAuth(false);
     }
-  }, [carregarMetadados, checarAbaWhatsApp]);
+  }, []);
 
+  // 1. checarSessao roda UMA vez ao abrir o painel
   useEffect(() => {
     checarSessao();
-  }, [checarSessao]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Escutar mudança de aba e recarregamento para sincronizar painel
+  // 3. carregarMetadados roda uma vez, depois que autorizado vira true.
+  // 4. checarAbaWhatsApp roda quando autorizado vira true.
+  useEffect(() => {
+    if (autorizado) {
+      if (!metadadosCarregadosRef.current) {
+        metadadosCarregadosRef.current = true;
+        carregarMetadados();
+      }
+      checarAbaWhatsApp();
+    }
+  }, [autorizado, carregarMetadados, checarAbaWhatsApp]);
+
+  // 4. checarAbaWhatsApp roda nos eventos chrome.tabs.onActivated / onUpdated (status 'complete')
   useEffect(() => {
     if (!autorizado) return;
 
@@ -399,7 +435,7 @@ export function SidePanelApp() {
             setDadosContato(null);
           } else {
             setEstadoAba('ok');
-            buscarDadosContato(payload, marcas);
+            buscarDadosContato(payload);
           }
         }
       }
@@ -409,11 +445,12 @@ export function SidePanelApp() {
     return () => {
       chrome.runtime.onMessage.removeListener(listener);
     };
-  }, [autorizado, buscarDadosContato, marcas]);
+  }, [autorizado, buscarDadosContato]);
 
   async function handleLogout() {
     try {
       await supabase.auth.signOut();
+      metadadosCarregadosRef.current = false;
       setUsuarioEmail(null);
       setAutorizado(null);
       setDadosContato(null);
@@ -427,8 +464,33 @@ export function SidePanelApp() {
   function handleRecarregar() {
     checarAbaWhatsApp();
     if (conversa && estadoAba === 'ok') {
-      buscarDadosContato(conversa, marcas);
+      buscarDadosContato(conversa);
     }
+  }
+
+  // Trava de segurança contra laço infinito
+  if (erroLoop) {
+    return (
+      <div className="panel-app">
+        <ToastContainer />
+        <div className="panel-loading-container" style={{ minHeight: '100vh', justifyContent: 'center' }}>
+          <div
+            className="alert-box alert-error"
+            style={{
+              textAlign: 'center',
+              width: '100%',
+              maxWidth: '300px',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <span style={{ fontSize: '24px' }}>🛑</span>
+            <p style={{ margin: 0, fontWeight: 600 }}>{erroLoop}</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Visualização de Carregamento Inicial
@@ -595,7 +657,7 @@ export function SidePanelApp() {
               className="btn-primary btn-sm mt-3"
               onClick={() => {
                 if (conversa) {
-                  buscarDadosContato(conversa, marcas);
+                  buscarDadosContato(conversa);
                 } else {
                   checarAbaWhatsApp();
                 }
