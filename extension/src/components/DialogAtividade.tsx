@@ -3,6 +3,7 @@ import { supabase } from '../supabase';
 import { formatarData, obterHojeSP } from '../date-utils';
 import type { TipoRegistro } from '../types';
 import { showToast } from './Toast';
+import { comTimeout } from '../async-utils';
 
 interface DialogAtividadeProps {
   contatoId: string;
@@ -42,14 +43,18 @@ export function DialogAtividade({
 
     setCarregando(true);
     try {
-      const { error: rpcErr } = await supabase.rpc('registrar_atividade', {
-        p_tipo: tipo,
-        p_texto: texto.trim(),
-        p_contato_id: contatoId,
-        p_cliente_id: clienteId,
-        ...(dataProxima ? { p_data_proxima: dataProxima } : {}),
-        ...(motivo.trim() ? { p_motivo: motivo.trim() } : {}),
-      });
+      const { error: rpcErr } = await comTimeout(
+        supabase.rpc('registrar_atividade', {
+          p_tipo: tipo,
+          p_texto: texto.trim(),
+          p_contato_id: contatoId,
+          p_cliente_id: clienteId,
+          ...(dataProxima ? { p_data_proxima: dataProxima } : {}),
+          ...(motivo.trim() ? { p_motivo: motivo.trim() } : {}),
+        }),
+        10000,
+        'Não foi possível conectar ao CRM. Verifique a internet.'
+      );
 
       if (rpcErr) {
         throw new Error(rpcErr.message);

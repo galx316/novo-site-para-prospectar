@@ -38,5 +38,7 @@ export const supabase = createClient(__SUPABASE_URL__, __SUPABASE_ANON_KEY__, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    lock: async (_name, _acquireTimeout, fn) => await fn(),
   },
 });
+

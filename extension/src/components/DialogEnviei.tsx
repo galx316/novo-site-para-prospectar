@@ -3,6 +3,7 @@ import { supabase } from '../supabase';
 import { adicionarDiasSP, formatarData, obterHojeSP } from '../date-utils';
 import type { Oportunidade } from '../types';
 import { showToast } from './Toast';
+import { comTimeout } from '../async-utils';
 
 interface DialogEnvieiProps {
   contatoId: string;
@@ -46,13 +47,17 @@ export function DialogEnviei({
           ? oportunidadesValidas[0]!.id
           : oportunidadeId || undefined;
 
-      const { error: rpcErr } = await supabase.rpc('registrar_envio', {
-        p_contato_id: contatoId,
-        p_canal: 'whatsapp',
-        ...(opFinal ? { p_oportunidade_id: opFinal } : {}),
-        ...(dataProxima ? { p_data_proxima: dataProxima } : {}),
-        ...(texto.trim() ? { p_texto: texto.trim() } : {}),
-      });
+      const { error: rpcErr } = await comTimeout(
+        supabase.rpc('registrar_envio', {
+          p_contato_id: contatoId,
+          p_canal: 'whatsapp',
+          ...(opFinal ? { p_oportunidade_id: opFinal } : {}),
+          ...(dataProxima ? { p_data_proxima: dataProxima } : {}),
+          ...(texto.trim() ? { p_texto: texto.trim() } : {}),
+        }),
+        10000,
+        'Não foi possível conectar ao CRM. Verifique a internet.'
+      );
 
       if (rpcErr) {
         throw new Error(rpcErr.message);

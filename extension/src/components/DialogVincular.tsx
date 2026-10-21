@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
 import { showToast } from './Toast';
+import { comTimeout } from '../async-utils';
 
 interface DialogVincularProps {
   tituloConversa: string;
@@ -41,57 +42,63 @@ export function DialogVincular({
     const timer = setTimeout(async () => {
       setCarregando(true);
       try {
-        // 1. Buscar contatos por ilike
-        const { data: contatos, error: errC } = await supabase
-          .from('contatos')
-          .select('id, nome, cargo, whatsapp, cliente_id, clientes(id, nome)')
-          .ilike('nome', `%${termo}%`)
-          .limit(20);
+        await comTimeout(
+          (async () => {
+            // 1. Buscar contatos por ilike
+            const { data: contatos, error: errC } = await supabase
+              .from('contatos')
+              .select('id, nome, cargo, whatsapp, cliente_id, clientes(id, nome)')
+              .ilike('nome', `%${termo}%`)
+              .limit(20);
 
-        // 2. Buscar clientes por ilike
-        const { data: clientes, error: errCli } = await supabase
-          .from('clientes')
-          .select('id, nome, contatos(id, nome, cargo, whatsapp, cliente_id)')
-          .ilike('nome', `%${termo}%`)
-          .limit(20);
+            // 2. Buscar clientes por ilike
+            const { data: clientes, error: errCli } = await supabase
+              .from('clientes')
+              .select('id, nome, contatos(id, nome, cargo, whatsapp, cliente_id)')
+              .ilike('nome', `%${termo}%`)
+              .limit(20);
 
-        if (errC) console.error(errC);
-        if (errCli) console.error(errCli);
+            if (errC) console.error(errC);
+            if (errCli) console.error(errCli);
 
-        const lista: ItemResultado[] = [];
-        const idsVistos = new Set<string>();
+            const lista: ItemResultado[] = [];
+            const idsVistos = new Set<string>();
 
-        (contatos || []).forEach((c: any) => {
-          if (!idsVistos.has(c.id)) {
-            idsVistos.add(c.id);
-            lista.push({
-              contatoId: c.id,
-              contatoNome: c.nome,
-              contatoCargo: c.cargo,
-              contatoWhatsapp: c.whatsapp,
-              clienteId: c.clientes?.id || c.cliente_id,
-              clienteNome: c.clientes?.nome || 'Construtora',
+            (contatos || []).forEach((c: any) => {
+              if (!idsVistos.has(c.id)) {
+                idsVistos.add(c.id);
+                lista.push({
+                  contatoId: c.id,
+                  contatoNome: c.nome,
+                  contatoCargo: c.cargo,
+                  contatoWhatsapp: c.whatsapp,
+                  clienteId: c.clientes?.id || c.cliente_id,
+                  clienteNome: c.clientes?.nome || 'Construtora',
+                });
+              }
             });
-          }
-        });
 
-        (clientes || []).forEach((cli: any) => {
-          (cli.contatos || []).forEach((c: any) => {
-            if (!idsVistos.has(c.id)) {
-              idsVistos.add(c.id);
-              lista.push({
-                contatoId: c.id,
-                contatoNome: c.nome,
-                contatoCargo: c.cargo,
-                contatoWhatsapp: c.whatsapp,
-                clienteId: cli.id,
-                clienteNome: cli.nome,
+            (clientes || []).forEach((cli: any) => {
+              (cli.contatos || []).forEach((c: any) => {
+                if (!idsVistos.has(c.id)) {
+                  idsVistos.add(c.id);
+                  lista.push({
+                    contatoId: c.id,
+                    contatoNome: c.nome,
+                    contatoCargo: c.cargo,
+                    contatoWhatsapp: c.whatsapp,
+                    clienteId: cli.id,
+                    clienteNome: cli.nome,
+                  });
+                }
               });
-            }
-          });
-        });
+            });
 
-        setResultados(lista);
+            setResultados(lista);
+          })(),
+          10000,
+          'Não foi possível buscar contatos. Verifique a internet.'
+        );
       } catch (e) {
         console.error('Erro na busca de contatos:', e);
       } finally {
@@ -115,37 +122,43 @@ export function DialogVincular({
   async function concluirVinculo(contatoId: string, salvarNumero: boolean) {
     setSalvando(true);
     try {
-      if (salvarNumero && numeroConversa) {
-        // Salvar a variante de 13 dígitos (com o 9) quando ela existir
-        const d = numeroConversa.replace(/\D/g, '');
-        const comDDI = d.length === 10 || d.length === 11 ? '55' + d : d;
-        let numeroParaSalvar = numeroConversa;
-        if (comDDI.length === 13 && comDDI.startsWith('55') && comDDI[4] === '9') {
-          numeroParaSalvar = comDDI;
-        } else if (
-          comDDI.length === 12 &&
-          comDDI.startsWith('55') &&
-          ['6', '7', '8', '9'].includes(comDDI[4])
-        ) {
-          numeroParaSalvar = comDDI.slice(0, 4) + '9' + comDDI.slice(4);
-        }
+      await comTimeout(
+        (async () => {
+          if (salvarNumero && numeroConversa) {
+            // Salvar a variante de 13 dígitos (com o 9) quando ela existir
+            const d = numeroConversa.replace(/\D/g, '');
+            const comDDI = d.length === 10 || d.length === 11 ? '55' + d : d;
+            let numeroParaSalvar = numeroConversa;
+            if (comDDI.length === 13 && comDDI.startsWith('55') && comDDI[4] === '9') {
+              numeroParaSalvar = comDDI;
+            } else if (
+              comDDI.length === 12 &&
+              comDDI.startsWith('55') &&
+              ['6', '7', '8', '9'].includes(comDDI[4])
+            ) {
+              numeroParaSalvar = comDDI.slice(0, 4) + '9' + comDDI.slice(4);
+            }
 
-        const { error: errUpd } = await supabase
-          .from('contatos')
-          .update({ whatsapp: numeroParaSalvar })
-          .eq('id', contatoId);
+            const { error: errUpd } = await supabase
+              .from('contatos')
+              .update({ whatsapp: numeroParaSalvar })
+              .eq('id', contatoId);
 
-        if (errUpd) {
-          showToast(`Erro ao salvar WhatsApp: ${errUpd.message}`, 'erro');
-        }
-      }
+            if (errUpd) {
+              showToast(`Erro ao salvar WhatsApp: ${errUpd.message}`, 'erro');
+            }
+          }
 
-      // Salvar vínculo em chrome.storage.local (título -> contato_id)
-      const storageKey = `vinculo_${tituloConversa}`;
-      await chrome.storage.local.set({ [storageKey]: contatoId });
+          // Salvar vínculo em chrome.storage.local (título -> contato_id)
+          const storageKey = `vinculo_${tituloConversa}`;
+          await chrome.storage.local.set({ [storageKey]: contatoId });
 
-      showToast('Contato vinculado com sucesso!');
-      onSuccess(contatoId);
+          showToast('Contato vinculado com sucesso!');
+          onSuccess(contatoId);
+        })(),
+        10000,
+        'Não foi possível salvar o vínculo. Verifique a internet.'
+      );
     } catch (e: any) {
       showToast(e?.message || 'Erro ao vincular contato.', 'erro');
     } finally {

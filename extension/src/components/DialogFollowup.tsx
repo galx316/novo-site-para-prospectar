@@ -3,6 +3,7 @@ import { supabase } from '../supabase';
 import { adicionarDiasSP, formatarData, obterHojeSP } from '../date-utils';
 import type { Followup } from '../types';
 import { showToast } from './Toast';
+import { comTimeout } from '../async-utils';
 
 interface DialogFollowupProps {
   contatoId: string;
@@ -43,10 +44,14 @@ export function DialogFollowup({
     try {
       if (isRemarcar) {
         // Remarcar follow-up existente
-        const { error: rpcErr } = await supabase.rpc('remarcar_followup', {
-          p_id: followupPendente.id,
-          p_data: novaData,
-        });
+        const { error: rpcErr } = await comTimeout(
+          supabase.rpc('remarcar_followup', {
+            p_id: followupPendente.id,
+            p_data: novaData,
+          }),
+          10000,
+          'Não foi possível conectar ao CRM. Verifique a internet.'
+        );
 
         if (rpcErr) throw new Error(rpcErr.message);
 
@@ -59,14 +64,18 @@ export function DialogFollowup({
         showToast('Follow-up remarcado com sucesso!');
       } else {
         // Criar novo follow-up com registrar_atividade
-        const { error: rpcErr } = await supabase.rpc('registrar_atividade', {
-          p_tipo: 'nota',
-          p_texto: 'Follow-up agendado pelo WhatsApp',
-          p_contato_id: contatoId,
-          p_cliente_id: clienteId,
-          p_data_proxima: novaData,
-          p_motivo: motivo.trim() || 'Follow-up agendado pelo WhatsApp',
-        });
+        const { error: rpcErr } = await comTimeout(
+          supabase.rpc('registrar_atividade', {
+            p_tipo: 'nota',
+            p_texto: 'Follow-up agendado pelo WhatsApp',
+            p_contato_id: contatoId,
+            p_cliente_id: clienteId,
+            p_data_proxima: novaData,
+            p_motivo: motivo.trim() || 'Follow-up agendado pelo WhatsApp',
+          }),
+          10000,
+          'Não foi possível conectar ao CRM. Verifique a internet.'
+        );
 
         if (rpcErr) throw new Error(rpcErr.message);
 

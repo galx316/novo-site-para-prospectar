@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabase';
+import { comTimeout } from '../async-utils';
 
 interface LoginViewProps {
   onSuccess: () => void;
@@ -23,10 +24,14 @@ export function LoginView({ onSuccess }: LoginViewProps) {
 
     setCarregando(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: emailTrim,
-        password,
-      });
+      const { error } = await comTimeout(
+        supabase.auth.signInWithPassword({
+          email: emailTrim,
+          password,
+        }),
+        10000,
+        'Não foi possível conectar ao CRM. Verifique a internet.'
+      );
 
       if (error) {
         setErro(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message);
@@ -34,7 +39,11 @@ export function LoginView({ onSuccess }: LoginViewProps) {
       }
 
       // Checar se o usuário é autorizado através da RPC is_authorized
-      const { data: autorizado, error: rpcErr } = await supabase.rpc('is_authorized');
+      const { data: autorizado, error: rpcErr } = await comTimeout(
+        supabase.rpc('is_authorized'),
+        10000,
+        'Não foi possível conectar ao CRM. Verifique a internet.'
+      );
       if (rpcErr) {
         await supabase.auth.signOut();
         setErro(`Erro ao validar autorização: ${rpcErr.message}`);
@@ -49,7 +58,7 @@ export function LoginView({ onSuccess }: LoginViewProps) {
 
       onSuccess();
     } catch (err: any) {
-      setErro(err?.message || 'Erro ao realizar login.');
+      setErro(err?.message || 'Não foi possível conectar ao CRM. Verifique a internet.');
     } finally {
       setCarregando(false);
     }
@@ -96,7 +105,7 @@ export function LoginView({ onSuccess }: LoginViewProps) {
           </div>
 
           <button type="submit" className="btn-primary btn-block" disabled={carregando}>
-            {carregando ? 'Entrando...' : 'Entrar'}
+            {carregando ? 'Entrando...' : erro ? 'Tentar de novo' : 'Entrar'}
           </button>
         </form>
 

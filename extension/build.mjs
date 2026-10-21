@@ -174,7 +174,7 @@ const manifest = {
   name: 'GAL Gestão - WhatsApp',
   version: '1.0.0',
   description: 'Painel lateral de inteligência comercial para WhatsApp Web no CRM GAL Gestão.',
-  permissions: ['sidePanel', 'storage'],
+  permissions: ['sidePanel', 'storage', 'tabs'],
   host_permissions: [
     'https://web.whatsapp.com/*',
     supabaseHostPermission,

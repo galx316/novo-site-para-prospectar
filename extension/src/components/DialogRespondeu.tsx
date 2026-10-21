@@ -3,6 +3,7 @@ import { supabase } from '../supabase';
 import { adicionarDiasSP, formatarData, obterHojeSP } from '../date-utils';
 import type { Oportunidade, SituacaoResposta } from '../types';
 import { showToast } from './Toast';
+import { comTimeout } from '../async-utils';
 
 interface DialogRespondeuProps {
   contatoId: string;
@@ -101,18 +102,22 @@ export function DialogRespondeu({
           ? `${mesAnoNecessidade}-01`
           : undefined;
 
-      const { error: rpcErr } = await supabase.rpc('registrar_resposta', {
-        p_contato_id: contatoId,
-        p_canal: 'whatsapp',
-        p_situacao: situacao,
-        ...(opFinal ? { p_oportunidade_id: opFinal } : {}),
-        ...(necessidadeFormatada ? { p_necessidade: necessidadeFormatada } : {}),
-        ...(situacao === 'falar_depois' && dataFalarDepois ? { p_data_proxima: dataFalarDepois } : {}),
-        ...(situacao === 'atendido_outro_rep_prado' && nomeRepresentante.trim()
-          ? { p_representante: nomeRepresentante.trim() }
-          : {}),
-        ...(texto.trim() ? { p_texto: texto.trim() } : {}),
-      });
+      const { error: rpcErr } = await comTimeout(
+        supabase.rpc('registrar_resposta', {
+          p_contato_id: contatoId,
+          p_canal: 'whatsapp',
+          p_situacao: situacao,
+          ...(opFinal ? { p_oportunidade_id: opFinal } : {}),
+          ...(necessidadeFormatada ? { p_necessidade: necessidadeFormatada } : {}),
+          ...(situacao === 'falar_depois' && dataFalarDepois ? { p_data_proxima: dataFalarDepois } : {}),
+          ...(situacao === 'atendido_outro_rep_prado' && nomeRepresentante.trim()
+            ? { p_representante: nomeRepresentante.trim() }
+            : {}),
+          ...(texto.trim() ? { p_texto: texto.trim() } : {}),
+        }),
+        10000,
+        'Não foi possível conectar ao CRM. Verifique a internet.'
+      );
 
       if (rpcErr) {
         throw new Error(rpcErr.message);
