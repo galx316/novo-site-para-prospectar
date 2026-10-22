@@ -61,6 +61,15 @@ export function NaoEncontradoView({ conversa, onAbrirVincular }: NaoEncontradoVi
         </div>
       </div>
 
+      {!conversa.numero && (
+        <div className="dica-painel-numero">
+          <span className="dica-icon">💡</span>
+          <span className="dica-texto">
+            Clique no nome no topo da conversa para abrir os Dados do contato. O painel lê o número.
+          </span>
+        </div>
+      )}
+
       <div className="alert-box alert-info">
         <span className="alert-icon">ℹ</span>
         <div>

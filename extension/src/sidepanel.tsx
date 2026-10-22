@@ -43,6 +43,25 @@ export function variantesNumeroBR(numero?: string | null): string[] {
   return [d];
 }
 
+/**
+ * Retorna o número brasileiro com o 9º dígito (para salvar no contato do CRM).
+ */
+export function obterVarianteComNove(numero?: string | null): string {
+  if (!numero) return '';
+  let d = numero.replace(/\D/g, '');
+  if (!d) return '';
+
+  if (d.length === 10 || d.length === 11) {
+    d = '55' + d;
+  }
+
+  if (d.length === 12 && d.startsWith('55') && ['6', '7', '8', '9'].includes(d[4])) {
+    return d.slice(0, 4) + '9' + d.slice(4);
+  }
+
+  return d;
+}
+
 export function SidePanelApp() {
   const [verificandoAuth, setVerificandoAuth] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
@@ -125,9 +144,24 @@ export function SidePanelApp() {
             let followupPendenteObj: any = null;
             let oportunidadesList: any[] = [];
 
+            // Se não houver número no payload mas houver título, tentar buscar número salvo no storage
+            let numeroConsulta = infoConversa.numero;
+            if (!numeroConsulta && infoConversa.titulo) {
+              try {
+                const storageKeyNum = `numero_${infoConversa.titulo}`;
+                const resNum = await chrome.storage.local.get(storageKeyNum);
+                if (resNum && resNum[storageKeyNum]) {
+                  numeroConsulta = String(resNum[storageKeyNum]);
+                  infoConversa.numero = numeroConsulta;
+                  infoConversa.origemNumero = 'dados_contato';
+                  setConversa((prev) => (prev ? { ...prev, numero: numeroConsulta, origemNumero: 'dados_contato' } : prev));
+                }
+              } catch {}
+            }
+
             // a) Se houver número, chamar a RPC buscar_contato_por_whatsapp para cada variante
-            if (infoConversa.numero) {
-              const variantes = variantesNumeroBR(infoConversa.numero);
+            if (numeroConsulta) {
+              const variantes = variantesNumeroBR(numeroConsulta);
               for (const varNumero of variantes) {
                 const { data: rpcData, error: rpcErr } = await supabase.rpc(
                   'buscar_contato_por_whatsapp',

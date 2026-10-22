@@ -12,6 +12,7 @@ export interface ConversaInfo {
   erro?: 'nao_identificado' | null;
   titulo?: string | null;
   numero?: string | null;
+  origemNumero?: 'titulo' | 'data_id' | 'dados_contato' | null;
   ultimaMensagem?: UltimaMensagemInfo | null;
 }
 

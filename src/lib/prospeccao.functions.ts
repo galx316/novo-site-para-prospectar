@@ -7,11 +7,152 @@ type TipoRegistro = Database['public']['Enums']['tipo_registro'];
 type SituacaoPrado = Database['public']['Enums']['situacao_prado'];
 type EtapaComercial = Database['public']['Enums']['etapa_comercial'];
 
+export const SITUACAO_LABELS: Record<SituacaoPrado, string> = {
+  nao_verificado: 'Não verificado',
+  livre: 'Livre',
+  ja_cliente: 'Já é cliente',
+  atendida_outro_rep: 'Atendido por outro representante',
+};
+
 async function assertAuthorized(supabase: any) {
   const { data: authorized, error } = await supabase.rpc('is_authorized');
   if (error) throw new Error(error.message);
   if (!authorized) throw new Error('Seu e-mail não está autorizado no sistema.');
 }
+
+/**
+ * Salva situação comercial de uma marca na construtora.
+ * Se a marca for PRADO, atualiza clientes.situacao_prado / representante_prado.
+ * Se for outra marca, upsert em situacao_marca.
+ * Registra nota de histórico no formato "Situação <marca>: <antes> → <depois>".
+ */
+export async function salvarSituacaoMarcaHelper({
+  supabase,
+  clienteId,
+  marcaId,
+  situacao,
+  representante,
+  gravarHistorico = true,
+}: {
+  supabase: any;
+  clienteId: string;
+  marcaId: string;
+  situacao: SituacaoPrado;
+  representante?: string | null | undefined;
+  gravarHistorico?: boolean;
+}) {
+  const { data: marca, error: mErr } = await supabase
+    .from('marcas')
+    .select('id, nome')
+    .eq('id', marcaId)
+    .single();
+
+  if (mErr || !marca) throw new Error(mErr?.message || 'Marca não encontrada.');
+
+  const repLimpo = situacao === 'atendida_outro_rep' ? representante?.trim() || null : null;
+  const isPrado = marca.nome?.trim()?.toUpperCase() === 'PRADO';
+
+  if (isPrado) {
+    const { data: cliente, error: cliErr } = await supabase
+      .from('clientes')
+      .select('situacao_prado, representante_prado')
+      .eq('id', clienteId)
+      .single();
+
+    if (cliErr) throw new Error(cliErr.message);
+
+    const antes: SituacaoPrado = cliente?.situacao_prado || 'nao_verificado';
+    const depois: SituacaoPrado = situacao;
+
+    const { error: updErr } = await supabase
+      .from('clientes')
+      .update({
+        situacao_prado: depois,
+        representante_prado: repLimpo,
+      })
+      .eq('id', clienteId);
+
+    if (updErr) throw new Error(updErr.message);
+
+    if (gravarHistorico && antes !== depois) {
+      const antesTxt = SITUACAO_LABELS[antes] || antes;
+      const depoisTxt = SITUACAO_LABELS[depois] || depois;
+      const { error: regErr } = await supabase.from('registros').insert({
+        cliente_id: clienteId,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: `Situação PRADO: ${antesTxt} → ${depoisTxt}`,
+      });
+      if (regErr) throw new Error(regErr.message);
+    }
+  } else {
+    const { data: sitExistente, error: sitErr } = await supabase
+      .from('situacao_marca')
+      .select('situacao, representante')
+      .eq('cliente_id', clienteId)
+      .eq('marca_id', marcaId)
+      .maybeSingle();
+
+    if (sitErr) throw new Error(sitErr.message);
+
+    const antes: SituacaoPrado = sitExistente?.situacao || 'nao_verificado';
+    const depois: SituacaoPrado = situacao;
+
+    const { error: upErr } = await supabase
+      .from('situacao_marca')
+      .upsert(
+        {
+          cliente_id: clienteId,
+          marca_id: marcaId,
+          situacao: depois,
+          representante: repLimpo,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'cliente_id,marca_id' }
+      );
+
+    if (upErr) throw new Error(upErr.message);
+
+    if (gravarHistorico && antes !== depois) {
+      const antesTxt = SITUACAO_LABELS[antes] || antes;
+      const depoisTxt = SITUACAO_LABELS[depois] || depois;
+      const { error: regErr } = await supabase.from('registros').insert({
+        cliente_id: clienteId,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: `Situação ${marca.nome}: ${antesTxt} → ${depoisTxt}`,
+      });
+      if (regErr) throw new Error(regErr.message);
+    }
+  }
+}
+
+/**
+ * Server function para salvar situação de marca individualmente
+ */
+export const salvarSituacaoMarca = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    clienteId: string;
+    marcaId: string;
+    situacao: SituacaoPrado;
+    representante?: string | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    await salvarSituacaoMarcaHelper({
+      supabase,
+      clienteId: data.clienteId,
+      marcaId: data.marcaId,
+      situacao: data.situacao,
+      representante: data.representante,
+      gravarHistorico: true,
+    });
+
+    return { success: true };
+  });
 
 /**
  * Listagem principal de prospects para a tela /prospeccao
@@ -65,10 +206,19 @@ export const listarProspects = createServerFn({ method: 'GET' })
       }
     } else {
       let query = supabase.from('clientes').select('*').order('updated_at', { ascending: false }).limit(200);
-      if (data?.situacao) {
-        query = query.eq('situacao_prado', data.situacao);
-      } else if (data?.apenasOutroRep) {
-        query = query.eq('situacao_prado', 'atendida_outro_rep');
+      const sitAlvo = data?.situacao || (data?.apenasOutroRep ? 'atendida_outro_rep' : undefined);
+      if (sitAlvo) {
+        const { data: sits, error: sitErr } = await supabase
+          .from('situacao_marca')
+          .select('cliente_id')
+          .eq('situacao', sitAlvo);
+        if (sitErr) throw new Error(sitErr.message);
+        const extraIds = (sits || []).map((s: any) => s.cliente_id);
+        if (extraIds.length > 0) {
+          query = query.or(`situacao_prado.eq.${sitAlvo},id.in.(${extraIds.join(',')})`);
+        } else {
+          query = query.eq('situacao_prado', sitAlvo);
+        }
       }
       const { data: todosClientes, error: errTodos } = await query;
       if (errTodos) throw new Error(errTodos.message);
@@ -81,8 +231,8 @@ export const listarProspects = createServerFn({ method: 'GET' })
 
     const clienteIds = clientesList.map((c: any) => c.id);
 
-    // 3. Buscar contatos, oportunidades e follow-ups pendentes para esses clientes
-    const [contatosRes, oportunidadesRes, followupsRes] = await Promise.all([
+    // 3. Buscar contatos, oportunidades, follow-ups pendentes e situações por marca para esses clientes
+    const [contatosRes, oportunidadesRes, followupsRes, situacoesRes] = await Promise.all([
       supabase.from('contatos').select('*').in('cliente_id', clienteIds).order('created_at', { ascending: true }),
       supabase.from('oportunidades').select('*').in('cliente_id', clienteIds).order('created_at', { ascending: false }),
       supabase
@@ -91,11 +241,13 @@ export const listarProspects = createServerFn({ method: 'GET' })
         .in('cliente_id', clienteIds)
         .eq('status', 'pendente')
         .order('data', { ascending: true }),
+      supabase.from('situacao_marca').select('*').in('cliente_id', clienteIds),
     ]);
 
     if (contatosRes.error) throw new Error(contatosRes.error.message);
     if (oportunidadesRes.error) throw new Error(oportunidadesRes.error.message);
     if (followupsRes.error) throw new Error(followupsRes.error.message);
+    if (situacoesRes.error) throw new Error(situacoesRes.error.message);
 
     // Agrupar contatos por cliente_id
     const contatosPorCliente = new Map<string, any[]>();
@@ -104,6 +256,15 @@ export const listarProspects = createServerFn({ method: 'GET' })
       const list = contatosPorCliente.get(c.cliente_id) || [];
       list.push(c);
       contatosPorCliente.set(c.cliente_id, list);
+    }
+
+    // Agrupar situações por cliente_id
+    const situacoesPorCliente = new Map<string, any[]>();
+    for (const s of situacoesRes.data || []) {
+      if (!s.cliente_id) continue;
+      const list = situacoesPorCliente.get(s.cliente_id) || [];
+      list.push(s);
+      situacoesPorCliente.set(s.cliente_id, list);
     }
 
     // Agrupar oportunidades por cliente_id e enriquecer com marcas
@@ -130,6 +291,8 @@ export const listarProspects = createServerFn({ method: 'GET' })
       const contatos = contatosPorCliente.get(cliente.id) || [];
       const oportunidades = opsPorCliente.get(cliente.id) || [];
       const followupPendente = followupPorCliente.get(cliente.id) || null;
+      const situacoesCliente = situacoesPorCliente.get(cliente.id) || [];
+      const sitMap = new Map(situacoesCliente.map((s: any) => [s.marca_id, s]));
 
       // Obter marcas consolidadas das oportunidades
       const marcasUnicasMap = new Map<string, any>();
@@ -139,6 +302,32 @@ export const listarProspects = createServerFn({ method: 'GET' })
             marcasUnicasMap.set(m.id, m);
           }
         });
+      });
+
+      const marcasFormatadas = Array.from(marcasUnicasMap.values()).map((m: any) => {
+        const isPrado = m.nome?.trim()?.toUpperCase() === 'PRADO';
+        if (isPrado) {
+          return {
+            ...m,
+            situacao: (cliente.situacao_prado || 'nao_verificado') as SituacaoPrado,
+            representante: cliente.representante_prado || null,
+          };
+        }
+        const s = sitMap.get(m.id);
+        return {
+          ...m,
+          situacao: (s?.situacao || 'nao_verificado') as SituacaoPrado,
+          representante: s?.representante || null,
+        };
+      });
+
+      // PRADO primeiro, depois as demais alfabeticamente
+      marcasFormatadas.sort((a, b) => {
+        const aPrado = a.nome?.trim()?.toUpperCase() === 'PRADO';
+        const bPrado = b.nome?.trim()?.toUpperCase() === 'PRADO';
+        if (aPrado && !bPrado) return -1;
+        if (!aPrado && bPrado) return 1;
+        return a.nome.localeCompare(b.nome);
       });
 
       // Etapa principal (da oportunidade mais recente ou do follow-up)
@@ -155,7 +344,8 @@ export const listarProspects = createServerFn({ method: 'GET' })
         contato_principal: contatos[0] || null,
         oportunidades,
         oportunidade_principal: oportunidades[0] || null,
-        marcas: Array.from(marcasUnicasMap.values()),
+        marcas: marcasFormatadas,
+        situacoes_marca: situacoesCliente,
         etapa: etapaPrincipal,
         followup_pendente: followupPendente,
       };
@@ -171,9 +361,13 @@ export const listarProspects = createServerFn({ method: 'GET' })
     }
 
     if (data?.situacao) {
-      prospects = prospects.filter((p: any) => p.situacao_prado === data.situacao);
+      prospects = prospects.filter((p: any) =>
+        p.situacao_prado === data.situacao || p.marcas.some((m: any) => m.situacao === data.situacao)
+      );
     } else if (data?.apenasOutroRep) {
-      prospects = prospects.filter((p: any) => p.situacao_prado === 'atendida_outro_rep');
+      prospects = prospects.filter((p: any) =>
+        p.situacao_prado === 'atendida_outro_rep' || p.marcas.some((m: any) => m.situacao === 'atendida_outro_rep')
+      );
     }
 
     if (data?.apenasSemProximoPasso) {
@@ -200,7 +394,7 @@ export const obterFichaCliente = createServerFn({ method: 'GET' })
     const { clienteId } = data;
     if (!clienteId) throw new Error('ID do cliente não informado.');
 
-    const [clienteRes, contatosRes, oportunidadesRes, followupsRes, registrosRes, marcasRes, configRes] =
+    const [clienteRes, contatosRes, oportunidadesRes, followupsRes, registrosRes, marcasRes, configRes, situacoesRes] =
       await Promise.all([
         supabase.from('clientes').select('*').eq('id', clienteId).single(),
         supabase.from('contatos').select('*').eq('cliente_id', clienteId).order('created_at', { ascending: true }),
@@ -219,6 +413,7 @@ export const obterFichaCliente = createServerFn({ method: 'GET' })
           .order('created_at', { ascending: false }),
         supabase.from('marcas').select('*').order('nome'),
         supabase.from('configuracoes').select('*').eq('id', 1).single(),
+        supabase.from('situacao_marca').select('*').eq('cliente_id', clienteId),
       ]);
 
     if (clienteRes.error) throw new Error('Cliente não encontrado.');
@@ -226,6 +421,7 @@ export const obterFichaCliente = createServerFn({ method: 'GET' })
     if (oportunidadesRes.error) throw new Error(oportunidadesRes.error.message);
     if (registrosRes.error) throw new Error(registrosRes.error.message);
     if (marcasRes.error) throw new Error(marcasRes.error.message);
+    if (situacoesRes.error) throw new Error(situacoesRes.error.message);
 
     const marcas = marcasRes.data || [];
     const marcasMap = new Map(marcas.map((m: any) => [m.id, m]));
@@ -243,6 +439,8 @@ export const obterFichaCliente = createServerFn({ method: 'GET' })
       followup_destaque: followupsRes.data?.[0] || null,
       registros: registrosRes.data || [],
       marcas,
+      situacoes_marca: situacoesRes.data || [],
+      situacao_marca: situacoesRes.data || [],
       configuracoes: configRes.data,
     };
   });
@@ -288,6 +486,11 @@ export const criarProspect = createServerFn({ method: 'POST' })
     canalEnvio?: TipoRegistro | undefined;
     dataProximaEnvio?: string | undefined;
     etapa?: 'prospeccao' | 'orcamento' | 'negociacao' | 'perdido' | undefined;
+    situacoes?: Array<{
+      marcaId: string;
+      situacao: SituacaoPrado;
+      representante?: string | undefined;
+    }> | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -459,6 +662,20 @@ export const criarProspect = createServerFn({ method: 'POST' })
           status: 'pendente',
         });
         if (followupErr) throw new Error(followupErr.message);
+      }
+
+      // 5. Salvar situações por marca
+      if (data.situacoes && data.situacoes.length > 0) {
+        for (const sit of data.situacoes) {
+          await salvarSituacaoMarcaHelper({
+            supabase,
+            clienteId,
+            marcaId: sit.marcaId,
+            situacao: sit.situacao,
+            representante: sit.representante,
+            gravarHistorico: !!data.usarClienteId,
+          });
+        }
       }
 
       return {
@@ -697,6 +914,12 @@ export const atualizarCliente = createServerFn({ method: 'POST' })
     const { supabase } = context;
     await assertAuthorized(supabase);
 
+    const { data: clienteAtual } = await supabase
+      .from('clientes')
+      .select('situacao_prado')
+      .eq('id', data.id)
+      .maybeSingle();
+
     const { error } = await supabase
       .from('clientes')
       .update({
@@ -711,6 +934,19 @@ export const atualizarCliente = createServerFn({ method: 'POST' })
       .eq('id', data.id);
 
     if (error) throw new Error(error.message);
+
+    if (clienteAtual && clienteAtual.situacao_prado !== data.situacaoPrado) {
+      const antesTxt = SITUACAO_LABELS[clienteAtual.situacao_prado as SituacaoPrado] || clienteAtual.situacao_prado;
+      const depoisTxt = SITUACAO_LABELS[data.situacaoPrado] || data.situacaoPrado;
+      const { error: regErr } = await supabase.from('registros').insert({
+        cliente_id: data.id,
+        tipo: 'nota',
+        direcao: 'nenhuma',
+        texto: `Situação PRADO: ${antesTxt} → ${depoisTxt}`,
+      });
+      if (regErr) throw new Error(regErr.message);
+    }
+
     return { success: true };
   });
 
@@ -873,6 +1109,11 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
     descricao?: string | null | undefined;
     contatoId?: string | null | undefined;
     etapa?: 'prospeccao' | 'orcamento' | 'negociacao' | 'perdido' | undefined;
+    situacoes?: Array<{
+      marcaId: string;
+      situacao: SituacaoPrado;
+      representante?: string | undefined;
+    }> | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -994,6 +1235,20 @@ export const editarOportunidade = createServerFn({ method: 'POST' })
       if (regErr) throw new Error(regErr.message);
     }
 
+    // 5. Atualizar situações por marca
+    if (data.situacoes && data.situacoes.length > 0) {
+      for (const sit of data.situacoes) {
+        await salvarSituacaoMarcaHelper({
+          supabase,
+          clienteId: data.clienteId,
+          marcaId: sit.marcaId,
+          situacao: sit.situacao,
+          representante: sit.representante,
+          gravarHistorico: true,
+        });
+      }
+    }
+
     return { success: true, oportunidade: opAtualizada };
   });
 
@@ -1008,6 +1263,11 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
     descricao?: string | null | undefined;
     contatoId?: string | null | undefined;
     etapa?: 'prospeccao' | 'orcamento' | 'negociacao' | 'perdido' | undefined;
+    situacoes?: Array<{
+      marcaId: string;
+      situacao: SituacaoPrado;
+      representante?: string | undefined;
+    }> | undefined;
   }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
@@ -1084,6 +1344,20 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
       texto: `Nova oportunidade: ${nomesMarcas}`,
     });
     if (regErr) throw new Error(regErr.message);
+
+    // 5. Salvar situações por marca
+    if (data.situacoes && data.situacoes.length > 0) {
+      for (const sit of data.situacoes) {
+        await salvarSituacaoMarcaHelper({
+          supabase,
+          clienteId: data.clienteId,
+          marcaId: sit.marcaId,
+          situacao: sit.situacao,
+          representante: sit.representante,
+          gravarHistorico: true,
+        });
+      }
+    }
 
     return { success: true, oportunidade: novaOp };
   });

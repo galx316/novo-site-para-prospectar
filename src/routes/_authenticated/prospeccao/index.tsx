@@ -10,7 +10,7 @@ import { formatarData, statusData } from '@/lib/date-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { SeloPrado } from '@/components/prospeccao/selo-prado';
+import { SeloPrado, SeloSituacaoMarca } from '@/components/prospeccao/selo-prado';
 import { EtapaBadge, ETAPAS_LABELS } from '@/components/prospeccao/etapa-badge';
 import { DialogEnviei } from '@/components/prospeccao/dialog-enviei';
 import { DialogRespondeu } from '@/components/prospeccao/dialog-respondeu';
@@ -370,12 +370,53 @@ function ProspeccaoPage() {
                         {p.nome}
                       </Link>
 
-                      {/* Selo PRADO */}
-                      <SeloPrado
-                        situacao={p.situacao_prado}
-                        representante={p.representante_prado}
-                      />
+                      {/* Situação comercial por marca (PRADO primeiro, apenas marcas das oportunidades) */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {p.marcas && p.marcas.length > 0 ? (
+                          p.marcas.map((m: any) => (
+                            <SeloSituacaoMarca
+                              key={m.id}
+                              marcaNome={m.nome}
+                              situacao={m.situacao}
+                              representante={m.representante}
+                            />
+                          ))
+                        ) : (
+                          <SeloPrado
+                            situacao={p.situacao_prado}
+                            representante={p.representante_prado}
+                          />
+                        )}
+                      </div>
                     </div>
+
+                    {/* Aviso vermelho para marcas atendidas por outro representante */}
+                    {p.marcas && p.marcas.length > 0 ? (
+                      p.marcas
+                        .filter((m: any) => m.situacao === 'atendida_outro_rep')
+                        .map((m: any) => (
+                          <div
+                            key={m.id}
+                            className="mt-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive flex items-center gap-1.5"
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              <strong>Atenção:</strong> {m.nome} é atendida por outro representante (
+                              {m.representante || 'outro representante'}).
+                            </span>
+                          </div>
+                        ))
+                    ) : (
+                      p.situacao_prado === 'atendida_outro_rep' && (
+                        <div className="mt-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive flex items-center gap-1.5">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            <strong>Atenção:</strong> PRADO é atendida por outro representante (
+                            {p.representante_prado || 'outro representante'}).
+                          </span>
+                        </div>
+                      )
+                    )}
 
                     {/* Cidade / UF e Contato */}
                     <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">

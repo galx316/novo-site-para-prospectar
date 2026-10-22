@@ -15,6 +15,113 @@ function soDigitos(str: string): string {
   return str.replace(/\D/g, '');
 }
 
+// Cache em memória de números salvos vinculados a títulos
+const numerosSalvosCache = new Map<string, string>();
+
+function obterNumeroSalvo(titulo: string): string | null {
+  if (!titulo) return null;
+  return numerosSalvosCache.get(titulo) || null;
+}
+
+function sincronizarNumeroStorage(titulo: string) {
+  if (!titulo || numerosSalvosCache.has(titulo)) return;
+  try {
+    const chave = `numero_${titulo}`;
+    chrome.storage.local.get(chave, (res) => {
+      if (res && res[chave]) {
+        numerosSalvosCache.set(titulo, String(res[chave]));
+      }
+    });
+  } catch {}
+}
+
+function encontrarPainelDadosContato(): HTMLElement | null {
+  // 1. Seletores conhecidos do drawer direito do WhatsApp Web
+  const seletores = [
+    '[data-testid="contact-info-drawer"]',
+    '[data-testid="drawer-right"]',
+    '[data-testid="chat-info-drawer"]',
+  ];
+  for (const sel of seletores) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el && el.innerText?.trim()) return el;
+  }
+
+  // 2. Elemento irmão de #main à direita (painel lateral aberto pelo WhatsApp quando o usuário clica)
+  const main = document.querySelector<HTMLElement>('#main');
+  if (main) {
+    let next = main.nextElementSibling as HTMLElement | null;
+    while (next) {
+      if (
+        next.innerText?.trim() &&
+        !next.querySelector('#main') &&
+        !next.querySelector('#pane-side')
+      ) {
+        return next;
+      }
+      next = next.nextElementSibling as HTMLElement | null;
+    }
+  }
+
+  // 3. Qualquer section, aside ou div com role="region" fora de #main e #pane-side cujo texto sugira dados do contato
+  const possiveis = document.querySelectorAll<HTMLElement>(
+    'section, aside, div[role="region"], div[tabindex="-1"]'
+  );
+  for (const el of possiveis) {
+    if (el.closest('#main') || el.closest('#pane-side')) continue;
+    const txt = (el.innerText || '').toLowerCase();
+    if (
+      txt.includes('dados do contato') ||
+      txt.includes('contact info') ||
+      txt.includes('info. do contato') ||
+      txt.includes('dados da empresa') ||
+      txt.includes('business details')
+    ) {
+      return el;
+    }
+  }
+
+  return null;
+}
+
+function extrairNumeroDadosContato(): string | null {
+  const painel = encontrarPainelDadosContato();
+  if (!painel) return null;
+
+  // Regex para formatos como "+55 11 98765-4321", "+55 11 8765-4321", com ou sem espaços e hífen
+  const regexTelefone = /(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?(?:9\s*)?\d{4}[-\s]?\d{4}/;
+
+  // 1. Procurar em elementos folhas (spans, divs, p) com pouco texto
+  const elementos = painel.querySelectorAll<HTMLElement>('span, div, p');
+  for (const el of elementos) {
+    if (el.children.length > 1) continue;
+    const txtBruto = el.innerText?.trim();
+    if (!txtBruto) continue;
+    const txt = txtBruto.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+    if ((txt.match(/\d/g) || []).length < 8) continue;
+
+    const match = txt.match(regexTelefone);
+    if (match) {
+      const digitos = soDigitos(match[0]);
+      if (digitos.length >= 10 && digitos.length <= 15) {
+        return digitos;
+      }
+    }
+  }
+
+  // 2. Fallback no texto geral do painel
+  const txtGeral = (painel.innerText || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+  const matchGeral = txtGeral.match(regexTelefone);
+  if (matchGeral) {
+    const digitos = soDigitos(matchGeral[0]);
+    if (digitos.length >= 10 && digitos.length <= 15) {
+      return digitos;
+    }
+  }
+
+  return null;
+}
+
 function ehTelefone(titulo: string): boolean {
   const limpo = titulo.trim();
   // Se contiver qualquer caractere alfabético, não é telefone
@@ -83,14 +190,19 @@ function extrairConversa(): ConversaInfo {
     // Verificar se a conversa aberta é de grupo (@g.us)
     const ehGrupo = !!main.querySelector('[data-id*="@g.us"]');
 
-    // b) Número: se o título for um telefone, use os dígitos.
-    // Senão, procure nas mensagens da conversa aberta um atributo data-id que contenha "@c.us"
-    // e extraia os dígitos antes de "@c.us". Ignore conversas de grupo ("@g.us").
-    // Se não achar número, envie só o título.
+    // b) Número e Origem do Número:
+    // Ordem de tentativa: título → data-id "@c.us" → Dados do contato → vínculo salvo
     let numero: string | null = null;
+    let origemNumero: 'titulo' | 'data_id' | 'dados_contato' | null = null;
+
+    // 1. Título
     if (ehTelefone(titulo)) {
       numero = soDigitos(titulo);
-    } else if (!ehGrupo) {
+      origemNumero = 'titulo';
+    }
+
+    // 2. data-id "@c.us" nas mensagens da conversa aberta (não grupo)
+    if (!numero && !ehGrupo) {
       const msgsComDataId = main.querySelectorAll<HTMLElement>('[data-id*="@c.us"]');
       for (const el of msgsComDataId) {
         const dataId = el.getAttribute('data-id') || '';
@@ -98,8 +210,36 @@ function extrairConversa(): ConversaInfo {
         const match = dataId.match(/(?:^|[_\s])(\d{8,15})@c\.us/);
         if (match && match[1]) {
           numero = match[1];
+          origemNumero = 'data_id';
           break;
         }
+      }
+    }
+
+    // 3. Dados do contato (painel lateral direito quando aberto pelo usuário)
+    if (!numero) {
+      const numDadosContato = extrairNumeroDadosContato();
+      if (numDadosContato) {
+        numero = numDadosContato;
+        origemNumero = 'dados_contato';
+        // Salva em chrome.storage.local numero_<título> = número
+        if (titulo) {
+          try {
+            chrome.storage.local.set({ [`numero_${titulo}`]: numero });
+            numerosSalvosCache.set(titulo, numero);
+          } catch {}
+        }
+      }
+    }
+
+    // 4. Vínculo salvo (chrome.storage.local)
+    if (!numero && titulo) {
+      const salvo = obterNumeroSalvo(titulo);
+      if (salvo) {
+        numero = salvo;
+        origemNumero = 'dados_contato';
+      } else {
+        sincronizarNumeroStorage(titulo);
       }
     }
 
@@ -162,6 +302,7 @@ function extrairConversa(): ConversaInfo {
       aberta: true,
       titulo,
       numero,
+      origemNumero,
       ultimaMensagem,
     };
   } catch {

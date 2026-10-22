@@ -1462,3 +1462,102 @@ textarea:focus {
   color: #3b82f6;
   font-weight: 800;
 }
+
+/* ==========================================================================
+   Dica para abrir Dados do contato & Salvar número
+   ========================================================================== */
+
+.dica-painel-numero {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px dashed rgba(59, 130, 246, 0.4);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 10px 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-main);
+}
+
+.dica-painel-numero .dica-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.dica-painel-numero .dica-texto {
+  color: var(--text-muted);
+}
+
+.salvar-numero-contato-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+
+.salvar-numero-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.salvar-numero-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.salvar-numero-titulo {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.salvar-numero-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.btn-salvar-wa {
+  align-self: flex-start;
+  padding: 5px 12px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.btn-salvar-wa:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.btn-salvar-wa:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.contato-wa-detectado {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.contato-wa-conversa {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+

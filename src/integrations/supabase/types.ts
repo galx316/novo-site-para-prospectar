@@ -726,6 +726,48 @@ export type Database = {
           },
         ]
       }
+      situacao_marca: {
+        Row: {
+          cliente_id: string
+          created_at: string
+          marca_id: string
+          representante: string | null
+          situacao: Database["public"]["Enums"]["situacao_prado"]
+          updated_at: string
+        }
+        Insert: {
+          cliente_id: string
+          created_at?: string
+          marca_id: string
+          representante?: string | null
+          situacao?: Database["public"]["Enums"]["situacao_prado"]
+          updated_at?: string
+        }
+        Update: {
+          cliente_id?: string
+          created_at?: string
+          marca_id?: string
+          representante?: string | null
+          situacao?: Database["public"]["Enums"]["situacao_prado"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "situacao_marca_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "situacao_marca_marca_id_fkey"
+            columns: ["marca_id"]
+            isOneToOne: false
+            referencedRelation: "marcas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       usuarios_autorizados: {
         Row: {
           created_at: string

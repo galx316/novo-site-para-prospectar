@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import type { DadosContatoPainel, ConversaInfo } from '../types';
 import { formatarData, formatarDataHora, statusData } from '../date-utils';
+import { supabase } from '../supabase';
+import { obterVarianteComNove } from '../sidepanel';
 import { SeloPrado } from './SeloPrado';
 import { DialogEnviei } from './DialogEnviei';
 import { DialogRespondeu } from './DialogRespondeu';
@@ -43,8 +45,32 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
   const [modalRespondeuAberto, setModalRespondeuAberto] = useState(false);
   const [modalFollowupAberto, setModalFollowupAberto] = useState(false);
   const [modalAtividadeAberto, setModalAtividadeAberto] = useState(false);
+  const [salvandoNumero, setSalvandoNumero] = useState(false);
 
   const { contato, cliente, oportunidades, followup_pendente, ultimos_registros, aviso_resposta_pendente } = dados;
+
+  async function handleSalvarNumeroContato() {
+    if (!conversa.numero || salvandoNumero) return;
+    setSalvandoNumero(true);
+    try {
+      const waComNove = obterVarianteComNove(conversa.numero);
+      const { error } = await supabase
+        .from('contatos')
+        .update({ whatsapp: waComNove })
+        .eq('id', contato.id);
+
+      if (error) {
+        showToast(error.message || 'Erro ao salvar número no contato.', 'erro');
+      } else {
+        showToast(`Número ${waComNove} salvo no contato com sucesso!`, 'sucesso');
+        onAtualizar();
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao salvar número no contato.', 'erro');
+    } finally {
+      setSalvandoNumero(false);
+    }
+  }
 
   async function handleAbrirCRM() {
     try {
@@ -77,6 +103,40 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
 
   return (
     <div className="contato-view-container">
+      {/* Dica para abrir Dados do contato quando não houver número detectado */}
+      {!conversa.numero && (
+        <div className="dica-painel-numero">
+          <span className="dica-icon">💡</span>
+          <span className="dica-texto">
+            Clique no nome no topo da conversa para abrir os Dados do contato. O painel lê o número.
+          </span>
+        </div>
+      )}
+
+      {/* Salvar número detectado no contato quando ele não tiver WhatsApp cadastrado */}
+      {!contato.whatsapp && conversa.numero && (
+        <div className="salvar-numero-contato-box">
+          <div className="salvar-numero-info">
+            <span className="salvar-numero-icon">📱</span>
+            <div>
+              <div className="salvar-numero-titulo">
+                Número detectado: <strong>{conversa.numero}</strong>
+              </div>
+              <div className="salvar-numero-sub">
+                Salvar este número no contato? (será salvo como {obterVarianteComNove(conversa.numero)})
+              </div>
+            </div>
+          </div>
+          <button
+            className="btn-salvar-wa"
+            disabled={salvandoNumero}
+            onClick={handleSalvarNumeroContato}
+          >
+            {salvandoNumero ? 'Salvando...' : 'Salvar no contato'}
+          </button>
+        </div>
+      )}
+
       {/* Aviso amarelo: Chegou resposta depois do seu último envio */}
       {aviso_resposta_pendente && (
         <div className="aviso-resposta-amarelo">
@@ -114,7 +174,16 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
           <div className="contato-info">
             <h3 className="contato-nome">{contato.nome}</h3>
             {contato.cargo && <span className="contato-cargo">{contato.cargo}</span>}
-            {contato.whatsapp && <span className="contato-wa">WA: {contato.whatsapp}</span>}
+            {contato.whatsapp ? (
+              <span className="contato-wa">
+                WA: {contato.whatsapp}
+                {conversa.numero && conversa.numero !== contato.whatsapp && (
+                  <span className="contato-wa-conversa"> (detectado: {conversa.numero})</span>
+                )}
+              </span>
+            ) : conversa.numero ? (
+              <span className="contato-wa-detectado">WA detectado: {conversa.numero}</span>
+            ) : null}
           </div>
         </div>
       </div>

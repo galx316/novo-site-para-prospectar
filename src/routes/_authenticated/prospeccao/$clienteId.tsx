@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -8,13 +8,14 @@ import {
   adicionarContato,
   editarContato,
   concluirFollowup,
+  salvarSituacaoMarca,
 } from '@/lib/prospeccao.functions';
 import { formatarData, formatarDataHora, formatarMesAno, statusData } from '@/lib/date-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { SeloPrado } from '@/components/prospeccao/selo-prado';
+import { SeloPrado, SeloSituacaoMarca } from '@/components/prospeccao/selo-prado';
 import { EtapaBadge } from '@/components/prospeccao/etapa-badge';
 import { DialogEnviei } from '@/components/prospeccao/dialog-enviei';
 import { DialogRespondeu } from '@/components/prospeccao/dialog-respondeu';
@@ -43,9 +44,18 @@ import {
   Briefcase,
   User,
   AlertCircle,
+  AlertTriangle,
   FileText,
   Sparkles,
 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
 
@@ -116,6 +126,47 @@ function FichaClientePage() {
   const criarContato = useServerFn(adicionarContato);
   const salvarEdicaoContato = useServerFn(editarContato);
   const executarConcluirFollowup = useServerFn(concluirFollowup);
+  const fnSalvarSituacaoMarca = useServerFn(salvarSituacaoMarca);
+
+  // Modal Alterar Situação da Marca
+  const [marcaAlterando, setMarcaAlterando] = useState<{
+    id: string;
+    nome: string;
+    situacao: SituacaoPrado;
+    representante?: string | null;
+  } | null>(null);
+  const [situacaoEdit, setSituacaoEdit] = useState<SituacaoPrado>('nao_verificado');
+  const [repEdit, setRepEdit] = useState<string>('');
+  const [salvandoSituacaoMarca, setSalvandoSituacaoMarca] = useState(false);
+
+  function abrirModalAlterarSituacao(m: any) {
+    setMarcaAlterando(m);
+    setSituacaoEdit(m.situacao || 'nao_verificado');
+    setRepEdit(m.representante || '');
+  }
+
+  async function handleSalvarSituacaoMarca(e: React.FormEvent) {
+    e.preventDefault();
+    if (!marcaAlterando) return;
+    setSalvandoSituacaoMarca(true);
+    try {
+      await fnSalvarSituacaoMarca({
+        data: {
+          clienteId,
+          marcaId: marcaAlterando.id,
+          situacao: situacaoEdit,
+          representante: situacaoEdit === 'atendida_outro_rep' ? repEdit.trim() : undefined,
+        },
+      });
+      toast.success(`Situação da marca ${marcaAlterando.nome} atualizada com sucesso!`);
+      setMarcaAlterando(null);
+      refetch();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao atualizar situação da marca.');
+    } finally {
+      setSalvandoSituacaoMarca(false);
+    }
+  }
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['ficha-cliente', clienteId],
@@ -129,6 +180,76 @@ function FichaClientePage() {
   const followupDestaque = data?.followup_destaque;
   const registros = data?.registros || [];
   const atalhosDias = data?.configuracoes?.atalhos_dias || [3, 7, 15, 30];
+  const situacoesMarca = data?.situacoes_marca || [];
+
+  const marcasMap = useMemo(() => new Map(marcas.map((m: any) => [m.id, m])), [marcas]);
+  const sitMap = useMemo(
+    () => new Map(situacoesMarca.map((s: any) => [s.marca_id, s])),
+    [situacoesMarca]
+  );
+
+  const marcasComSituacao = useMemo(() => {
+    const idsNasOportunidades = new Set<string>();
+    oportunidades.forEach((op: any) => {
+      (op.marca_ids || []).forEach((mid: string) => idsNasOportunidades.add(mid));
+    });
+
+    const resultado: Array<{
+      id: string;
+      nome: string;
+      situacao: SituacaoPrado;
+      representante?: string | null;
+      isPrado: boolean;
+    }> = [];
+
+    idsNasOportunidades.forEach((mid) => {
+      const m = marcasMap.get(mid);
+      const nome = m?.nome || 'Marca';
+      const isPrado = nome.trim().toUpperCase() === 'PRADO';
+      if (isPrado) {
+        resultado.push({
+          id: mid,
+          nome,
+          situacao: (cliente?.situacao_prado || 'nao_verificado') as SituacaoPrado,
+          representante: cliente?.representante_prado || null,
+          isPrado: true,
+        });
+      } else {
+        const sit = sitMap.get(mid);
+        resultado.push({
+          id: mid,
+          nome,
+          situacao: (sit?.situacao || 'nao_verificado') as SituacaoPrado,
+          representante: sit?.representante || null,
+          isPrado: false,
+        });
+      }
+    });
+
+    resultado.sort((a, b) => {
+      if (a.isPrado && !b.isPrado) return -1;
+      if (!a.isPrado && b.isPrado) return 1;
+      return a.nome.localeCompare(b.nome);
+    });
+
+    return resultado;
+  }, [oportunidades, marcasMap, sitMap, cliente?.situacao_prado, cliente?.representante_prado]);
+
+  const marcasAtendidasOutroRep = useMemo(() => {
+    const list = marcasComSituacao.filter((m) => m.situacao === 'atendida_outro_rep');
+    const pradoJaInclusa = list.some((m) => m.isPrado);
+    if (!pradoJaInclusa && cliente?.situacao_prado === 'atendida_outro_rep') {
+      const pradoMarca = marcas.find((m: any) => m.nome?.trim()?.toUpperCase() === 'PRADO');
+      list.unshift({
+        id: pradoMarca?.id || 'prado',
+        nome: pradoMarca?.nome || 'PRADO',
+        situacao: 'atendida_outro_rep',
+        representante: cliente?.representante_prado || null,
+        isPrado: true,
+      });
+    }
+    return list;
+  }, [marcasComSituacao, cliente?.situacao_prado, cliente?.representante_prado, marcas]);
 
   // Regra 1.2: Valor inicial do contato: o contato da oportunidade em foco, se houver; senão o contato selecionado; senão o primeiro.
   const opEmFoco = followupDestaque?.oportunidade_id
@@ -538,9 +659,72 @@ function FichaClientePage() {
                 {cliente.observacoes}
               </p>
             )}
+
+            {/* Aviso vermelho para marcas atendidas por outro representante */}
+            {marcasAtendidasOutroRep.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {marcasAtendidasOutroRep.map((m) => (
+                  <div
+                    key={m.id}
+                    className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-center gap-2"
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span>
+                      <strong>Atenção:</strong> A marca <strong>{m.nome}</strong> é atendida por outro representante (
+                      {m.representante || 'outro representante'}).
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </section>
+
+      {/* 1.1 Bloco Situação por marca */}
+      {marcasComSituacao.length > 0 && (
+        <section className="rounded-xl border border-border bg-card p-5 shadow-xs">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Briefcase className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+                Situação por marca
+              </h2>
+            </div>
+            <span className="text-xs text-muted-foreground font-medium">
+              {marcasComSituacao.length} {marcasComSituacao.length === 1 ? 'marca' : 'marcas'} nas oportunidades
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {marcasComSituacao.map((m) => (
+              <div
+                key={m.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-lg border border-border bg-accent/20 hover:bg-accent/30 transition-colors"
+              >
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="font-semibold text-sm text-foreground">{m.nome}</span>
+                  <SeloSituacaoMarca
+                    marcaNome={m.nome}
+                    situacao={m.situacao}
+                    representante={m.representante}
+                  />
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => abrirModalAlterarSituacao(m)}
+                  className="h-8 text-xs font-semibold gap-1.5 self-start sm:self-auto shrink-0"
+                >
+                  <Edit2 className="h-3 w-3" />
+                  Alterar
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 2. Follow-up Pendente em Destaque */}
       <section className="rounded-xl border border-border bg-card p-5 shadow-xs">
@@ -1197,6 +1381,7 @@ function FichaClientePage() {
         oportunidade={oportunidadeEditando}
         contatos={contatos}
         marcasDisponiveis={marcas}
+        situacoesMarca={data?.situacoes_marca || []}
         onSuccess={() => refetch()}
       />
       <DialogEnviei
@@ -1262,6 +1447,74 @@ function FichaClientePage() {
         oportunidadeId={opIniciarObraId}
         clienteNome={cliente?.nome}
       />
+
+      {/* Modal Alterar Situação da Marca */}
+      {marcaAlterando && (
+        <Dialog open={!!marcaAlterando} onOpenChange={(open) => !open && setMarcaAlterando(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold text-foreground">
+                Alterar Situação: {marcaAlterando.nome}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                {cliente?.nome}
+              </DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={handleSalvarSituacaoMarca} className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground block">
+                  Situação comercial *
+                </label>
+                <select
+                  value={situacaoEdit}
+                  onChange={(e) => setSituacaoEdit(e.target.value as SituacaoPrado)}
+                  className="w-full h-10 px-3 rounded-lg border border-input bg-card text-xs font-medium focus:ring-2 focus:ring-primary"
+                >
+                  <option value="nao_verificado">Não verificado</option>
+                  <option value="livre">Livre</option>
+                  <option value="ja_cliente">Já é cliente</option>
+                  <option value="atendida_outro_rep">Atendido por outro representante</option>
+                </select>
+              </div>
+
+              {situacaoEdit === 'atendida_outro_rep' && (
+                <div className="space-y-1.5 animate-in fade-in">
+                  <label className="text-xs font-semibold text-destructive block">
+                    Nome do representante
+                  </label>
+                  <Input
+                    placeholder="Ex: Carlos Silva"
+                    value={repEdit}
+                    onChange={(e) => setRepEdit(e.target.value)}
+                    className="h-10 bg-card text-xs"
+                  />
+                </div>
+              )}
+
+              <DialogFooter className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMarcaAlterando(null)}
+                  disabled={salvandoSituacaoMarca}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={salvandoSituacaoMarca}
+                  className="font-semibold"
+                >
+                  {salvandoSituacaoMarca ? 'Salvando...' : 'Salvar Situação'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </main>
   );
 }

@@ -104,6 +104,9 @@ export function DialogNovoProspect({
   // Pergunta pós-preenchimento: "Já enviou a apresentação?"
   const [jaEnviouApresentacao, setJaEnviouApresentacao] = useState(false);
   const [canalEnvio, setCanalEnvio] = useState<TipoRegistro>('whatsapp');
+  const [situacoesPorMarca, setSituacoesPorMarca] = useState<
+    Record<string, { situacao: SituacaoPrado; representante?: string | undefined }>
+  >({});
 
   // Mensagens de erro amigável (duplicidade)
   const [erroDuplicado, setErroDuplicado] = useState<{
@@ -134,6 +137,7 @@ export function DialogNovoProspect({
       setTelefone('');
       setWhatsapp(initialValues?.whatsapp || '');
       setEmail('');
+      setSituacoesPorMarca({});
 
       // Marcas ativas como opções de escolha
       const ativas = (marcasDisponiveis || []).filter((m: any) => m.ativa !== false);
@@ -256,6 +260,17 @@ export function DialogNovoProspect({
 
     setCarregando(true);
     try {
+      const situacoesPayload = marcasSelecionadas
+        .filter((id) => id !== pradoId)
+        .map((id) => ({
+          marcaId: id,
+          situacao: (situacoesPorMarca[id]?.situacao || 'nao_verificado') as SituacaoPrado,
+          representante:
+            situacoesPorMarca[id]?.situacao === 'atendida_outro_rep'
+              ? situacoesPorMarca[id]?.representante?.trim() || undefined
+              : undefined,
+        }));
+
       const resp = await submeterCriacao({
         data: {
           usarClienteId: clienteSelecionado?.id,
@@ -277,6 +292,7 @@ export function DialogNovoProspect({
           etapa,
           jaEnviouApresentacao,
           canalEnvio: jaEnviouApresentacao ? canalEnvio : undefined,
+          situacoes: situacoesPayload,
         },
       });
 
@@ -661,6 +677,90 @@ export function DialogNovoProspect({
                   >
                     Estou ciente e desejo manter a marca PRADO selecionada nesta oportunidade.
                   </label>
+                </div>
+              </div>
+            )}
+
+            {/* Situação para cada marca selecionada (exceto PRADO, que usa o campo que já existe) */}
+            {marcasSelecionadas.filter((id) => id !== pradoId).length > 0 && (
+              <div className="space-y-3 pt-3 border-t border-border/70">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
+                  Situação comercial das marcas selecionadas
+                </label>
+                <div className="space-y-2.5">
+                  {marcasSelecionadas
+                    .filter((id) => id !== pradoId)
+                    .map((id) => {
+                      const m = marcasLocais.find((item) => item.id === id);
+                      const sitObj = situacoesPorMarca[id] || { situacao: 'nao_verificado', representante: '' };
+                      return (
+                        <div
+                          key={id}
+                          className="p-3 rounded-lg border border-border bg-accent/20 space-y-2"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span className="font-semibold text-xs text-foreground shrink-0">
+                              {m?.nome || 'Marca'}
+                            </span>
+                            <select
+                              value={sitObj.situacao}
+                              onChange={(e) => {
+                                const novaSit = e.target.value as SituacaoPrado;
+                                setSituacoesPorMarca((prev) => {
+                                  const current = prev[id];
+                                  return {
+                                    ...prev,
+                                    [id]: {
+                                      situacao: novaSit,
+                                      representante: current?.representante,
+                                    },
+                                  };
+                                });
+                              }}
+                              className="w-full sm:w-64 h-9 px-2.5 rounded-md border border-input bg-card text-xs font-medium"
+                            >
+                              <option value="nao_verificado">Não verificado</option>
+                              <option value="livre">Livre</option>
+                              <option value="ja_cliente">Já é cliente</option>
+                              <option value="atendida_outro_rep">Atendido por outro representante</option>
+                            </select>
+                          </div>
+
+                          {sitObj.situacao === 'atendida_outro_rep' && (
+                            <div className="pt-1 animate-in fade-in space-y-1">
+                              <label className="text-[11px] font-semibold text-destructive block">
+                                Nome do representante da {m?.nome}
+                              </label>
+                              <Input
+                                placeholder="Ex: Carlos Silva"
+                                value={sitObj.representante || ''}
+                                onChange={(e) => {
+                                  const repVal = e.target.value;
+                                  setSituacoesPorMarca((prev) => {
+                                    const current = prev[id];
+                                    return {
+                                      ...prev,
+                                      [id]: {
+                                        situacao: current?.situacao || 'nao_verificado',
+                                        representante: repVal,
+                                      },
+                                    };
+                                  });
+                                }}
+                                className="h-8 bg-card text-xs"
+                              />
+                              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive flex items-center gap-1.5 mt-1">
+                                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                <span>
+                                  A marca <strong>{m?.nome}</strong> é atendida por outro representante (
+                                  {sitObj.representante || 'outro representante'}).
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               </div>
             )}
