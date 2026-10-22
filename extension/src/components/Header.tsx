@@ -4,12 +4,15 @@ interface HeaderProps {
   emailUsuario?: string | null;
   onRefresh: () => void;
   onLogout: () => void;
+  onAbrirOpcoes?: () => void;
   carregando?: boolean;
 }
 
-export function Header({ emailUsuario, onRefresh, onLogout, carregando }: HeaderProps) {
+export function Header({ emailUsuario, onRefresh, onLogout, onAbrirOpcoes, carregando }: HeaderProps) {
   function abrirOpcoes() {
-    if (chrome.runtime.openOptionsPage) {
+    if (onAbrirOpcoes) {
+      onAbrirOpcoes();
+    } else if (chrome.runtime.openOptionsPage) {
       chrome.runtime.openOptionsPage();
     } else {
       window.open(chrome.runtime.getURL('options.html'));

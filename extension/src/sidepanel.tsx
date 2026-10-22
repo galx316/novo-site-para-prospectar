@@ -62,6 +62,28 @@ export function obterVarianteComNove(numero?: string | null): string {
   return d;
 }
 
+/**
+ * Formata um número de telefone no padrão legível brasileiro (+55 11 98765-4321).
+ */
+export function formatarTelefone(numero?: string | null): string {
+  if (!numero) return '';
+  const d = numero.replace(/\D/g, '');
+  if (d.length === 13 && d.startsWith('55')) {
+    return `+55 ${d.slice(2, 4)} ${d.slice(4, 9)}-${d.slice(9)}`;
+  }
+  if (d.length === 12 && d.startsWith('55')) {
+    return `+55 ${d.slice(2, 4)} ${d.slice(4, 8)}-${d.slice(8)}`;
+  }
+  if (d.length === 11) {
+    return `+55 ${d.slice(0, 2)} ${d.slice(2, 7)}-${d.slice(7)}`;
+  }
+  if (d.length === 10) {
+    return `+55 ${d.slice(0, 2)} ${d.slice(2, 6)}-${d.slice(6)}`;
+  }
+  if (numero.startsWith('+')) return numero;
+  return `+${numero}`;
+}
+
 export function SidePanelApp() {
   const [verificandoAuth, setVerificandoAuth] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
@@ -80,6 +102,10 @@ export function SidePanelApp() {
   const [dadosContato, setDadosContato] = useState<DadosContatoPainel | null>(null);
 
   const [modalVincularAberto, setModalVincularAberto] = useState(false);
+  const [modalOpcoesAberto, setModalOpcoesAberto] = useState(false);
+  const [numeroSalvoNoCache, setNumeroSalvoNoCache] = useState<string | null>(null);
+  const [vinculoSalvoNoCache, setVinculoSalvoNoCache] = useState<string | null>(null);
+  const [numerosDescartados, setNumerosDescartados] = useState<Set<string>>(new Set());
   const [atalhosDias, setAtalhosDias] = useState<number[]>([3, 7, 15, 30]);
   const [marcas, setMarcas] = useState<Marca[]>([]);
 
@@ -157,6 +183,17 @@ export function SidePanelApp() {
                   setConversa((prev) => (prev ? { ...prev, numero: numeroConsulta, origemNumero: 'dados_contato' } : prev));
                 }
               } catch {}
+            }
+
+            // Ignorar números descartados pelo usuário nesta conversa
+            if (
+              infoConversa.titulo &&
+              numeroConsulta &&
+              numerosDescartados.has(`${infoConversa.titulo}_${numeroConsulta}`)
+            ) {
+              numeroConsulta = null;
+              infoConversa.numero = null;
+              infoConversa.origemNumero = null;
             }
 
             // a) Se houver número, chamar a RPC buscar_contato_por_whatsapp para cada variante
@@ -502,6 +539,88 @@ export function SidePanelApp() {
     }
   }
 
+  // Sincronizar cache salvo da conversa aberta
+  useEffect(() => {
+    if (!conversa?.titulo) {
+      setNumeroSalvoNoCache(null);
+      setVinculoSalvoNoCache(null);
+      return;
+    }
+    const kNum = `numero_${conversa.titulo}`;
+    const kVin = `vinculo_${conversa.titulo}`;
+    chrome.storage.local.get([kNum, kVin], (res) => {
+      setNumeroSalvoNoCache(res?.[kNum] ? String(res[kNum]) : null);
+      setVinculoSalvoNoCache(res?.[kVin] ? String(res[kVin]) : null);
+    });
+
+    function handleStorageChanged(changes: { [key: string]: chrome.storage.StorageChange }, area: string) {
+      if (area === 'local' && conversa?.titulo) {
+        const kNum = `numero_${conversa.titulo}`;
+        const kVin = `vinculo_${conversa.titulo}`;
+        if (kNum in changes) {
+          setNumeroSalvoNoCache(changes[kNum]?.newValue ? String(changes[kNum].newValue) : null);
+        }
+        if (kVin in changes) {
+          setVinculoSalvoNoCache(changes[kVin]?.newValue ? String(changes[kVin].newValue) : null);
+        }
+      }
+    }
+    chrome.storage.onChanged.addListener(handleStorageChanged);
+    return () => chrome.storage.onChanged.removeListener(handleStorageChanged);
+  }, [conversa?.titulo]);
+
+  const chaveDescarteAtual =
+    conversa?.titulo && conversa?.numero ? `${conversa.titulo}_${conversa.numero}` : '';
+
+  const precisaConfirmarNumero = !!(
+    conversa?.aberta &&
+    conversa?.titulo &&
+    conversa?.numero &&
+    conversa?.origemNumero === 'dados_contato' &&
+    !numeroSalvoNoCache &&
+    !numerosDescartados.has(chaveDescarteAtual)
+  );
+
+  async function handleConfirmarNumeroLido() {
+    if (!conversa?.titulo || !conversa?.numero) return;
+    const chave = `numero_${conversa.titulo}`;
+    try {
+      await chrome.storage.local.set({ [chave]: conversa.numero });
+      setNumeroSalvoNoCache(conversa.numero);
+      showToast(`Número ${formatarTelefone(conversa.numero)} confirmado e salvo para esta conversa!`, 'sucesso');
+    } catch (err: any) {
+      showToast('Erro ao salvar número.', 'erro');
+    }
+  }
+
+  function handleDescartarNumeroLido() {
+    if (!conversa?.titulo || !conversa?.numero) return;
+    const chaveDescarte = `${conversa.titulo}_${conversa.numero}`;
+    setNumerosDescartados((prev) => new Set(prev).add(chaveDescarte));
+    const novaConversa: ConversaInfo = { ...conversa, numero: null, origemNumero: null };
+    setConversa(novaConversa);
+    buscarDadosContato(novaConversa);
+    showToast('Número descartado.', 'info');
+  }
+
+  async function handleEsquecerNumeroDestaConversa() {
+    if (!conversa?.titulo) return;
+    const chaveNum = `numero_${conversa.titulo}`;
+    const chaveVinculo = `vinculo_${conversa.titulo}`;
+    try {
+      await chrome.storage.local.remove([chaveNum, chaveVinculo]);
+      setNumeroSalvoNoCache(null);
+      setVinculoSalvoNoCache(null);
+      setModalOpcoesAberto(false);
+      showToast(`Número e vínculo de "${conversa.titulo}" foram apagados.`, 'sucesso');
+      const novaConversa: ConversaInfo = { ...conversa, numero: null, origemNumero: null };
+      setConversa(novaConversa);
+      buscarDadosContato(novaConversa);
+    } catch (err: any) {
+      showToast('Erro ao esquecer dados da conversa.', 'erro');
+    }
+  }
+
   // Trava de segurança contra laço infinito
   if (erroLoop) {
     return (
@@ -602,10 +721,38 @@ export function SidePanelApp() {
         emailUsuario={usuarioEmail}
         onRefresh={handleRecarregar}
         onLogout={handleLogout}
+        onAbrirOpcoes={() => setModalOpcoesAberto(true)}
         carregando={carregandoConversa}
       />
 
       <main className="panel-content">
+        {/* Banner de confirmação de número lido nos Dados do contato */}
+        {precisaConfirmarNumero && (
+          <div className="banner-confirmar-numero">
+            <div className="banner-confirmar-info">
+              <span className="banner-confirmar-icon">📱</span>
+              <span className="banner-confirmar-texto">
+                Número lido: <strong>{formatarTelefone(conversa.numero)}</strong> — Confirmar
+              </span>
+            </div>
+            <div className="banner-confirmar-acoes">
+              <button
+                type="button"
+                className="btn-confirmar-num"
+                onClick={handleConfirmarNumeroLido}
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                className="btn-descartar-num"
+                onClick={handleDescartarNumeroLido}
+              >
+                Não é este
+              </button>
+            </div>
+          </div>
+        )}
         {/* Caso 1: Aba ativa não é web.whatsapp.com */}
         {estadoAba === 'nao_whatsapp' && (
           <div className="estado-vazio">
@@ -732,6 +879,19 @@ export function SidePanelApp() {
               onAbrirVincular={() => setModalVincularAberto(true)}
             />
           )}
+
+        {/* Rodapé com link para opções do painel / conversa */}
+        {estadoAba === 'ok' && conversa?.aberta && conversa?.titulo && (
+          <div className="painel-rodape-opcoes">
+            <button
+              type="button"
+              className="btn-link-opcoes"
+              onClick={() => setModalOpcoesAberto(true)}
+            >
+              ⚙ Opções do painel / Esquecer número
+            </button>
+          </div>
+        )}
       </main>
 
       {/* Modal Vincular */}
@@ -749,6 +909,84 @@ export function SidePanelApp() {
             handleRecarregar();
           }}
         />
+      )}
+
+      {/* Modal de Opções do Painel */}
+      {modalOpcoesAberto && (
+        <div className="modal-backdrop" onClick={() => setModalOpcoesAberto(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Opções do Painel</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setModalOpcoesAberto(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: '14px' }}>
+              <div className="opcoes-section">
+                <span className="opcoes-section-title">Conversa Aberta</span>
+                {conversa?.aberta && conversa?.titulo ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                    <div className="opcoes-item">
+                      <span style={{ fontWeight: 600 }}>{conversa.titulo}</span>
+                    </div>
+
+                    <div className="opcoes-sub">
+                      {numeroSalvoNoCache ? (
+                        <span>Número em cache: <strong>{formatarTelefone(numeroSalvoNoCache)}</strong></span>
+                      ) : (
+                        <span>Nenhum número em cache</span>
+                      )}
+                    </div>
+
+                    {vinculoSalvoNoCache && (
+                      <div className="opcoes-sub">
+                        <span>Vínculo manual no CRM: <strong>Ativo</strong></span>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="btn-danger btn-block mt-2"
+                      onClick={handleEsquecerNumeroDestaConversa}
+                    >
+                      Esquecer número desta conversa
+                    </button>
+                    <span className="field-hint" style={{ fontSize: '10.5px', marginTop: '2px' }}>
+                      Apaga o número em cache (numero_{conversa.titulo}) e o vínculo manual (vinculo_{conversa.titulo}) salvos para esta conversa.
+                    </span>
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Nenhuma conversa do WhatsApp aberta no momento.
+                  </p>
+                )}
+              </div>
+
+              <div className="opcoes-section">
+                <span className="opcoes-section-title">Configurações Gerais</span>
+                <button
+                  type="button"
+                  className="btn-secondary btn-block mt-2"
+                  onClick={() => {
+                    setModalOpcoesAberto(false);
+                    if (chrome.runtime.openOptionsPage) {
+                      chrome.runtime.openOptionsPage();
+                    } else {
+                      window.open(chrome.runtime.getURL('options.html'));
+                    }
+                  }}
+                >
+                  Abrir configurações avançadas (URL do CRM) ↗
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

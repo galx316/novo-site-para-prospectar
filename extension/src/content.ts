@@ -35,7 +35,35 @@ function sincronizarNumeroStorage(titulo: string) {
   } catch {}
 }
 
-function encontrarPainelDadosContato(): HTMLElement | null {
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local') {
+      for (const key of Object.keys(changes)) {
+        if (key.startsWith('numero_')) {
+          const tit = key.slice('numero_'.length);
+          if (!changes[key]?.newValue) {
+            numerosSalvosCache.delete(tit);
+          } else {
+            numerosSalvosCache.set(tit, String(changes[key].newValue));
+          }
+        }
+      }
+    }
+  });
+} catch {}
+
+function encontrarPainelDadosContato(tituloConversa: string): HTMLElement | null {
+  const tituloLimpo = (tituloConversa || '').trim().toLowerCase();
+  if (!tituloLimpo) return null;
+
+  function painelValido(el: HTMLElement | null): boolean {
+    if (!el) return false;
+    const txt = (el.innerText || '').toLowerCase();
+    if (!txt.trim()) return false;
+    // 2. Só aceite o painel se o texto dele contiver o título da conversa aberta (o mesmo nome do cabeçalho)
+    return txt.includes(tituloLimpo);
+  }
+
   // 1. Seletores conhecidos do drawer direito do WhatsApp Web
   const seletores = [
     '[data-testid="contact-info-drawer"]',
@@ -44,39 +72,23 @@ function encontrarPainelDadosContato(): HTMLElement | null {
   ];
   for (const sel of seletores) {
     const el = document.querySelector<HTMLElement>(sel);
-    if (el && el.innerText?.trim()) return el;
+    if (painelValido(el)) return el;
   }
 
-  // 2. Elemento irmão de #main à direita (painel lateral aberto pelo WhatsApp quando o usuário clica)
-  const main = document.querySelector<HTMLElement>('#main');
-  if (main) {
-    let next = main.nextElementSibling as HTMLElement | null;
-    while (next) {
-      if (
-        next.innerText?.trim() &&
-        !next.querySelector('#main') &&
-        !next.querySelector('#pane-side')
-      ) {
-        return next;
-      }
-      next = next.nextElementSibling as HTMLElement | null;
-    }
-  }
-
-  // 3. Qualquer section, aside ou div com role="region" fora de #main e #pane-side cujo texto sugira dados do contato
+  // 2. Busca por textos "Dados do contato" / "Contact info" / "Dados da empresa" / "Business details" fora de #main e #pane-side
   const possiveis = document.querySelectorAll<HTMLElement>(
     'section, aside, div[role="region"], div[tabindex="-1"]'
   );
   for (const el of possiveis) {
     if (el.closest('#main') || el.closest('#pane-side')) continue;
     const txt = (el.innerText || '').toLowerCase();
-    if (
+    const contemCabecalho =
       txt.includes('dados do contato') ||
       txt.includes('contact info') ||
-      txt.includes('info. do contato') ||
       txt.includes('dados da empresa') ||
-      txt.includes('business details')
-    ) {
+      txt.includes('business details');
+
+    if (contemCabecalho && painelValido(el)) {
       return el;
     }
   }
@@ -84,39 +96,37 @@ function encontrarPainelDadosContato(): HTMLElement | null {
   return null;
 }
 
-function extrairNumeroDadosContato(): string | null {
-  const painel = encontrarPainelDadosContato();
+function extrairNumeroDadosContato(tituloConversa: string): string | null {
+  const painel = encontrarPainelDadosContato(tituloConversa);
   if (!painel) return null;
 
-  // Regex para formatos como "+55 11 98765-4321", "+55 11 8765-4321", com ou sem espaços e hífen
-  const regexTelefone = /(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?(?:9\s*)?\d{4}[-\s]?\d{4}/;
+  // 3. Aceita só telefone que comece com "+" (o WhatsApp mostra assim, ex.: "+55 11 98765-4321")
+  const regexTelefone = /\+\s*\d{1,3}\s*(?:\(?\d{2,3}\)?\s*)?(?:9\s*)?\d{4}[-\s]?\d{4}/;
 
-  // 1. Procurar em elementos folhas (spans, divs, p) com pouco texto
+  const telefonesEncontrados = new Set<string>();
+
+  // 1. Procurar somente em elementos folhas (spans, divs, p) com pouco texto
   const elementos = painel.querySelectorAll<HTMLElement>('span, div, p');
   for (const el of elementos) {
     if (el.children.length > 1) continue;
     const txtBruto = el.innerText?.trim();
     if (!txtBruto) continue;
     const txt = txtBruto.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+    if (!txt.includes('+')) continue;
     if ((txt.match(/\d/g) || []).length < 8) continue;
 
     const match = txt.match(regexTelefone);
     if (match) {
       const digitos = soDigitos(match[0]);
       if (digitos.length >= 10 && digitos.length <= 15) {
-        return digitos;
+        telefonesEncontrados.add(digitos);
       }
     }
   }
 
-  // 2. Fallback no texto geral do painel
-  const txtGeral = (painel.innerText || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
-  const matchGeral = txtGeral.match(regexTelefone);
-  if (matchGeral) {
-    const digitos = soDigitos(matchGeral[0]);
-    if (digitos.length >= 10 && digitos.length <= 15) {
-      return digitos;
-    }
+  // 4. Se o painel tiver mais de um telefone diferente (ou nenhum), não escolha nenhum (retorne null)
+  if (telefonesEncontrados.size === 1) {
+    return Array.from(telefonesEncontrados)[0]!;
   }
 
   return null;
@@ -217,18 +227,11 @@ function extrairConversa(): ConversaInfo {
     }
 
     // 3. Dados do contato (painel lateral direito quando aberto pelo usuário)
-    if (!numero) {
-      const numDadosContato = extrairNumeroDadosContato();
+    if (!numero && titulo) {
+      const numDadosContato = extrairNumeroDadosContato(titulo);
       if (numDadosContato) {
         numero = numDadosContato;
         origemNumero = 'dados_contato';
-        // Salva em chrome.storage.local numero_<título> = número
-        if (titulo) {
-          try {
-            chrome.storage.local.set({ [`numero_${titulo}`]: numero });
-            numerosSalvosCache.set(titulo, numero);
-          } catch {}
-        }
       }
     }
 
