@@ -26,6 +26,18 @@ import { DialogOportunidade, type OportunidadeEdicao } from '@/components/prospe
 import { DialogIniciarObra } from '@/components/obras/dialog-iniciar-obra';
 import { DialogCadastrarObraFechada } from '@/components/obras/dialog-cadastrar-obra-fechada';
 import {
+  DialogEditarRegistro,
+  DialogExcluirRegistro,
+  DialogEditarFollowup,
+  DialogExcluirFollowup,
+} from '@/components/prospeccao/dialogs-historico-followup';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import {
   ArrowLeft,
   Building2,
   MapPin,
@@ -47,6 +59,8 @@ import {
   AlertTriangle,
   FileText,
   Sparkles,
+  MoreHorizontal,
+  Trash2,
 } from 'lucide-react';
 import {
   Dialog,
@@ -119,6 +133,13 @@ function FichaClientePage() {
   const [modalIniciarObra, setModalIniciarObra] = useState(false);
   const [opIniciarObraId, setOpIniciarObraId] = useState<string | null>(null);
   const [modalCadastrarObraFechada, setModalCadastrarObraFechada] = useState(false);
+
+  // Estados de edição e exclusão de histórico e follow-ups
+  const [registroEditando, setRegistroEditando] = useState<any | null>(null);
+  const [registroExcluindo, setRegistroExcluindo] = useState<any | null>(null);
+  const [followupEditando, setFollowupEditando] = useState<any | null>(null);
+  const [followupExcluindo, setFollowupExcluindo] = useState<any | null>(null);
+  const [followupRemarcando, setFollowupRemarcando] = useState<any | null>(null);
 
   // Server functions
   const fetchFicha = useServerFn(obterFichaCliente);
@@ -797,7 +818,10 @@ function FichaClientePage() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setModalRemarcar(true)}
+                onClick={() => {
+                  setFollowupRemarcando(followupDestaque);
+                  setModalRemarcar(true);
+                }}
                 className="h-10 px-3 text-xs font-semibold"
               >
                 Remarcar
@@ -812,7 +836,88 @@ function FichaClientePage() {
                 <Check className="h-3.5 w-3.5" />
                 Marcar como Feito
               </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setFollowupEditando(followupDestaque)}
+                className="h-10 px-3 text-xs font-semibold gap-1.5"
+              >
+                <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                Editar
+              </Button>
+
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setFollowupExcluindo(followupDestaque)}
+                className="h-10 px-3 text-xs font-semibold text-muted-foreground hover:text-destructive gap-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Excluir
+              </Button>
             </div>
+
+            {data?.followups_pendentes && data.followups_pendentes.length > 1 && (
+              <div className="pt-3 border-t border-border/60 space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Outros follow-ups pendentes ({data.followups_pendentes.length - 1}):
+                </p>
+                <div className="space-y-2">
+                  {data.followups_pendentes.slice(1).map((fup: any) => (
+                    <div
+                      key={fup.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg border border-border bg-card text-xs shadow-2xs"
+                    >
+                      <div>
+                        <span className="font-semibold text-foreground">{fup.motivo}</span>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Agendado para {formatarData(fup.data)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleConcluirFollowup(fup.id)}
+                          className="h-7 px-2.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 gap-1"
+                        >
+                          <Check className="h-3 w-3" />
+                          Feito
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setFollowupRemarcando(fup);
+                            setModalRemarcar(true);
+                          }}
+                          className="h-7 px-2.5 text-[11px] font-medium"
+                        >
+                          Remarcar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setFollowupEditando(fup)}
+                          className="h-7 px-2.5 text-[11px] font-medium"
+                        >
+                          Editar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setFollowupExcluindo(fup)}
+                          className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+                        >
+                          Excluir
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-center py-4">
@@ -1151,9 +1256,39 @@ function FichaClientePage() {
                         {reg.tipo === 'outro' ? 'Atividade' : reg.tipo} {reg.direcao !== 'nenhuma' && `• ${reg.direcao}`}
                         {reg.contatos?.nome && ` (${reg.contatos.nome})`}
                       </span>
-                      <span className="text-[11px] text-muted-foreground tabular-nums">
-                        {formatarDataHora(reg.data || reg.created_at)}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground tabular-nums">
+                          {formatarDataHora(reg.data || reg.created_at)}
+                        </span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                            >
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                              <span className="sr-only">Opções</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-28">
+                            <DropdownMenuItem
+                              onClick={() => setRegistroEditando(reg)}
+                              className="gap-2 text-xs cursor-pointer"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => setRegistroExcluindo(reg)}
+                              className="gap-2 text-xs text-destructive focus:text-destructive cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
 
                     {reg.texto && (
@@ -1418,17 +1553,50 @@ function FichaClientePage() {
         onSuccess={() => refetch()}
       />
 
-      {followupDestaque && (
+      {(followupRemarcando || followupDestaque) && (
         <DialogRemarcar
           open={modalRemarcar}
-          onOpenChange={setModalRemarcar}
-          followupId={followupDestaque.id}
-          motivo={followupDestaque.motivo}
-          dataAtual={followupDestaque.data}
+          onOpenChange={(aberto) => {
+            setModalRemarcar(aberto);
+            if (!aberto) setFollowupRemarcando(null);
+          }}
+          followupId={(followupRemarcando || followupDestaque)?.id}
+          motivo={(followupRemarcando || followupDestaque)?.motivo}
+          dataAtual={(followupRemarcando || followupDestaque)?.data}
           atalhosDias={atalhosDias}
           onSuccess={() => refetch()}
         />
       )}
+
+      {/* Modais de Histórico e Follow-up (Editar / Excluir) */}
+      <DialogEditarRegistro
+        open={!!registroEditando}
+        onOpenChange={(aberto) => !aberto && setRegistroEditando(null)}
+        registro={registroEditando}
+        onSucesso={() => refetch()}
+      />
+
+      <DialogExcluirRegistro
+        open={!!registroExcluindo}
+        onOpenChange={(aberto) => !aberto && setRegistroExcluindo(null)}
+        registro={registroExcluindo}
+        temAnexos={!!(registroExcluindo?.arquivos && registroExcluindo.arquivos.length > 0)}
+        onSucesso={() => refetch()}
+      />
+
+      <DialogEditarFollowup
+        open={!!followupEditando}
+        onOpenChange={(aberto) => !aberto && setFollowupEditando(null)}
+        followup={followupEditando}
+        onSucesso={() => refetch()}
+      />
+
+      <DialogExcluirFollowup
+        open={!!followupExcluindo}
+        onOpenChange={(aberto) => !aberto && setFollowupExcluindo(null)}
+        followup={followupExcluindo}
+        onSucesso={() => refetch()}
+      />
 
       <DialogMesclarCliente
         open={modalMesclar}

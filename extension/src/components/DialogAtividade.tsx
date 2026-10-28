@@ -9,6 +9,7 @@ interface DialogAtividadeProps {
   contatoId: string;
   clienteId: string;
   contatoNome: string;
+  onValidarConversa?: () => boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -17,6 +18,7 @@ export function DialogAtividade({
   contatoId,
   clienteId,
   contatoNome,
+  onValidarConversa,
   onClose,
   onSuccess,
 }: DialogAtividadeProps) {
@@ -35,6 +37,11 @@ export function DialogAtividade({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (onValidarConversa && !onValidarConversa()) {
+      onClose();
+      return;
+    }
 
     if (!texto.trim()) {
       showToast('Descreva a atividade.', 'erro');

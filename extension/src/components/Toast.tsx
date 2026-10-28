@@ -3,12 +3,12 @@ import React, { useEffect, useState } from 'react';
 export interface ToastMessage {
   id: string;
   texto: string;
-  tipo?: 'sucesso' | 'erro' | 'info';
+  tipo?: 'sucesso' | 'erro' | 'info' | 'aviso';
 }
 
 let toastListeners: Array<(msg: ToastMessage) => void> = [];
 
-export function showToast(texto: string, tipo: 'sucesso' | 'erro' | 'info' = 'sucesso') {
+export function showToast(texto: string, tipo: 'sucesso' | 'erro' | 'info' | 'aviso' = 'sucesso') {
   const msg: ToastMessage = {
     id: String(Date.now() + Math.random()),
     texto,
@@ -41,7 +41,7 @@ export function ToastContainer() {
       {toasts.map((t) => (
         <div key={t.id} className={`toast-item toast-${t.tipo || 'sucesso'}`}>
           <div className="toast-icon">
-            {t.tipo === 'erro' ? '✕' : t.tipo === 'info' ? 'ℹ' : '✓'}
+            {t.tipo === 'erro' ? '✕' : t.tipo === 'aviso' ? '⚠️' : t.tipo === 'info' ? 'ℹ' : '✓'}
           </div>
           <div className="toast-text">{t.texto}</div>
         </div>

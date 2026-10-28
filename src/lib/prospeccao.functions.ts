@@ -407,7 +407,7 @@ export const obterFichaCliente = createServerFn({ method: 'GET' })
           .order('data', { ascending: true }),
         supabase
           .from('registros')
-          .select('*, contatos(nome), oportunidades(descricao)')
+          .select('*, contatos(nome), oportunidades(descricao), arquivos(id)')
           .eq('cliente_id', clienteId)
           .order('data', { ascending: false })
           .order('created_at', { ascending: false }),
@@ -1361,4 +1361,139 @@ export const criarOportunidade = createServerFn({ method: 'POST' })
 
     return { success: true, oportunidade: novaOp };
   });
+
+/**
+ * Edição de registro do histórico
+ */
+export const editarRegistro = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    registroId: string;
+    texto?: string | undefined;
+    data?: string | undefined;
+    tipo?: TipoRegistro | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.registroId) throw new Error('ID do registro não informado.');
+
+    const updates: Partial<Database['public']['Tables']['registros']['Update']> = {};
+    if (data.texto !== undefined) {
+      updates.texto = data.texto.trim();
+    }
+    if (data.tipo !== undefined) {
+      updates.tipo = data.tipo;
+    }
+    if (data.data !== undefined && data.data) {
+      const dataStr = data.data.includes('T') ? data.data : `${data.data}T12:00:00-03:00`;
+      updates.data = dataStr;
+    }
+
+    const { error } = await supabase
+      .from('registros')
+      .update(updates)
+      .eq('id', data.registroId);
+
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
+
+/**
+ * Exclusão de registro do histórico
+ */
+export const excluirRegistro = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: { registroId: string }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.registroId) throw new Error('ID do registro não informado.');
+
+    // 1. Desvincular anexos antes para que continuem na aba Arquivos
+    const { error: errArq } = await supabase
+      .from('arquivos')
+      .update({ registro_id: null })
+      .eq('registro_id', data.registroId);
+
+    if (errArq) throw new Error(errArq.message);
+
+    // 2. Apagar o registro
+    const { error: errDel } = await supabase
+      .from('registros')
+      .delete()
+      .eq('id', data.registroId);
+
+    if (errDel) throw new Error(errDel.message);
+    return { success: true };
+  });
+
+/**
+ * Edição de follow-up (apenas se pendente)
+ */
+export const editarFollowup = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: {
+    followupId: string;
+    data?: string | undefined;
+    motivo?: string | undefined;
+  }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.followupId) throw new Error('ID do follow-up não informado.');
+
+    const { data: fu, error: fuErr } = await supabase
+      .from('followups')
+      .select('id, status')
+      .eq('id', data.followupId)
+      .single();
+
+    if (fuErr || !fu) throw new Error(fuErr?.message || 'Follow-up não encontrado.');
+    if (fu.status !== 'pendente') {
+      throw new Error('Apenas follow-ups pendentes podem ser editados.');
+    }
+
+    const updates: Partial<Database['public']['Tables']['followups']['Update']> = {};
+    if (data.data !== undefined && data.data) {
+      updates.data = data.data.slice(0, 10);
+    }
+    if (data.motivo !== undefined) {
+      updates.motivo = data.motivo.trim();
+    }
+
+    const { error: updErr } = await supabase
+      .from('followups')
+      .update(updates)
+      .eq('id', data.followupId)
+      .eq('status', 'pendente');
+
+    if (updErr) throw new Error(updErr.message);
+    return { success: true };
+  });
+
+/**
+ * Exclusão definitiva de follow-up (apaga de verdade)
+ */
+export const excluirFollowup = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .validator((data: { followupId: string }) => data)
+  .handler(async ({ context, data }) => {
+    const { supabase } = context;
+    await assertAuthorized(supabase);
+
+    if (!data.followupId) throw new Error('ID do follow-up não informado.');
+
+    const { error } = await supabase
+      .from('followups')
+      .delete()
+      .eq('id', data.followupId);
+
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
+
 

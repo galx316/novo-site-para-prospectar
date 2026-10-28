@@ -61,6 +61,18 @@ import { DialogRegistrarEntregaParcial } from '@/components/obras/dialog-registr
 import { DialogImportarCronograma } from '@/components/obras/dialog-importar-cronograma';
 import { CATEGORIAS_VISITA_LABELS, type CategoriaFollowup } from '@/lib/obras.functions';
 import {
+  DialogEditarRegistro,
+  DialogExcluirRegistro,
+  DialogEditarFollowup,
+  DialogExcluirFollowup,
+} from '@/components/prospeccao/dialogs-historico-followup';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import {
   Building2,
   ArrowLeft,
   Calendar,
@@ -85,6 +97,7 @@ import {
   CheckCheck,
   Paperclip,
   Wrench,
+  MoreHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -153,6 +166,12 @@ function FichaObraPage() {
   // Edição de nota em item do checklist
   const [editandoNotaItemId, setEditandoNotaItemId] = useState<string | null>(null);
   const [textoNotaItem, setTextoNotaItem] = useState('');
+
+  // Estados para edição/exclusão de histórico e follow-ups
+  const [registroEditando, setRegistroEditando] = useState<any | null>(null);
+  const [registroExcluindo, setRegistroExcluindo] = useState<any | null>(null);
+  const [followupEditando, setFollowupEditando] = useState<any | null>(null);
+  const [followupExcluindo, setFollowupExcluindo] = useState<any | null>(null);
 
   // Server functions
   const fetchObra = useServerFn(obterObra);
@@ -874,6 +893,22 @@ function FichaObraPage() {
                             </Button>
                             <Button
                               size="sm"
+                              variant="outline"
+                              onClick={() => setFollowupEditando(visita)}
+                              className="h-7 px-2 text-xs font-medium"
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setFollowupExcluindo(visita)}
+                              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                            >
+                              Excluir
+                            </Button>
+                            <Button
+                              size="sm"
                               variant="ghost"
                               onClick={() => handleCancelarFollowupObra(visita.id)}
                               className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
@@ -1556,6 +1591,22 @@ function FichaObraPage() {
                       </Button>
                       <Button
                         size="sm"
+                        variant="outline"
+                        onClick={() => setFollowupEditando(fup)}
+                        className="h-7 px-2 text-[11px] font-medium"
+                      >
+                        Editar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setFollowupExcluindo(fup)}
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+                      >
+                        Excluir
+                      </Button>
+                      <Button
+                        size="sm"
                         variant="ghost"
                         onClick={() => handleCancelarFollowupObra(fup.id)}
                         className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
@@ -1615,9 +1666,39 @@ function FichaObraPage() {
                             </Badge>
                           )}
                         </div>
-                        <span className="text-[11px] text-muted-foreground font-medium">
-                          {formatarDataHora(reg.data || reg.created_at)}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-muted-foreground font-medium">
+                            {formatarDataHora(reg.data || reg.created_at)}
+                          </span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                              >
+                                <MoreHorizontal className="h-3.5 w-3.5" />
+                                <span className="sr-only">Opções</span>
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-28">
+                              <DropdownMenuItem
+                                onClick={() => setRegistroEditando(reg)}
+                                className="gap-2 text-xs cursor-pointer"
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                                Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setRegistroExcluindo(reg)}
+                                className="gap-2 text-xs text-destructive focus:text-destructive cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Excluir
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </div>
 
                       <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
@@ -2022,6 +2103,36 @@ function FichaObraPage() {
         obraId={obraId}
         lote={loteImportandoCronograma}
         onSuccess={() => refetch()}
+      />
+
+      {/* Modais de Histórico e Follow-up (Editar / Excluir) */}
+      <DialogEditarRegistro
+        open={!!registroEditando}
+        onOpenChange={(aberto) => !aberto && setRegistroEditando(null)}
+        registro={registroEditando}
+        onSucesso={() => refetch()}
+      />
+
+      <DialogExcluirRegistro
+        open={!!registroExcluindo}
+        onOpenChange={(aberto) => !aberto && setRegistroExcluindo(null)}
+        registro={registroExcluindo}
+        temAnexos={!!(registroExcluindo && arquivos.some((a: any) => a.registro_id === registroExcluindo.id))}
+        onSucesso={() => refetch()}
+      />
+
+      <DialogEditarFollowup
+        open={!!followupEditando}
+        onOpenChange={(aberto) => !aberto && setFollowupEditando(null)}
+        followup={followupEditando}
+        onSucesso={() => refetch()}
+      />
+
+      <DialogExcluirFollowup
+        open={!!followupExcluindo}
+        onOpenChange={(aberto) => !aberto && setFollowupExcluindo(null)}
+        followup={followupExcluindo}
+        onSucesso={() => refetch()}
       />
     </main>
   );

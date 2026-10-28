@@ -142,6 +142,48 @@ function ehTelefone(titulo: string): boolean {
   return digitos.length >= 8;
 }
 
+function extrairTituloAtual(): string | null {
+  const main = document.querySelector<HTMLElement>('#main');
+  if (!main) return null;
+
+  const header = main.querySelector<HTMLElement>('header');
+  if (!header) return null;
+
+  const seletoresTitulo = [
+    'div[role="button"] span[title]',
+    'span[title]',
+    '[data-testid="conversation-info-header-chat-title"]',
+    'h2',
+  ];
+
+  for (const sel of seletoresTitulo) {
+    const el = header.querySelector<HTMLElement>(sel);
+    if (el) {
+      const val = el.getAttribute('title') || el.innerText;
+      if (val && val.trim()) {
+        return val.trim();
+      }
+    }
+  }
+
+  const spans = header.querySelectorAll<HTMLElement>('span[dir="auto"]');
+  for (const span of spans) {
+    const txt = span.innerText?.trim();
+    if (
+      txt &&
+      txt.length > 0 &&
+      !txt.toLowerCase().includes('online') &&
+      !txt.toLowerCase().includes('visto por último') &&
+      !txt.toLowerCase().includes('clique aqui') &&
+      !txt.toLowerCase().includes('digitando')
+    ) {
+      return txt;
+    }
+  }
+
+  return null;
+}
+
 function extrairConversa(): ConversaInfo {
   try {
     const main = document.querySelector<HTMLElement>('#main');
@@ -155,43 +197,7 @@ function extrairConversa(): ConversaInfo {
     }
 
     // a) Título do cabeçalho (nome ou número)
-    let titulo: string | null = null;
-    const seletoresTitulo = [
-      'div[role="button"] span[title]',
-      'span[title]',
-      '[data-testid="conversation-info-header-chat-title"]',
-      'h2',
-    ];
-
-    for (const sel of seletoresTitulo) {
-      const el = header.querySelector<HTMLElement>(sel);
-      if (el) {
-        const val = el.getAttribute('title') || el.innerText;
-        if (val && val.trim()) {
-          titulo = val.trim();
-          break;
-        }
-      }
-    }
-
-    if (!titulo) {
-      // Tentar span com dir="auto" com texto relevante
-      const spans = header.querySelectorAll<HTMLElement>('span[dir="auto"]');
-      for (const span of spans) {
-        const txt = span.innerText?.trim();
-        if (
-          txt &&
-          txt.length > 0 &&
-          !txt.toLowerCase().includes('online') &&
-          !txt.toLowerCase().includes('visto por último') &&
-          !txt.toLowerCase().includes('clique aqui') &&
-          !txt.toLowerCase().includes('digitando')
-        ) {
-          titulo = txt;
-          break;
-        }
-      }
-    }
+    const titulo = extrairTituloAtual();
 
     if (!titulo) {
       return { aberta: true, erro: 'nao_identificado' };
@@ -212,17 +218,23 @@ function extrairConversa(): ConversaInfo {
     }
 
     // 2. data-id "@c.us" nas mensagens da conversa aberta (não grupo)
+    // Requisito: junte os números de TODAS as mensagens do #main. Só use se todos forem iguais.
     if (!numero && !ehGrupo) {
       const msgsComDataId = main.querySelectorAll<HTMLElement>('[data-id*="@c.us"]');
+      const numerosEncontrados = new Set<string>();
       for (const el of msgsComDataId) {
         const dataId = el.getAttribute('data-id') || '';
         // data-id pode vir como: false_5511999999999@c.us_3EB... ou true_5511999999999@c.us_...
         const match = dataId.match(/(?:^|[_\s])(\d{8,15})@c\.us/);
         if (match && match[1]) {
-          numero = match[1];
-          origemNumero = 'data_id';
-          break;
+          numerosEncontrados.add(match[1]);
         }
+      }
+      if (numerosEncontrados.size === 1) {
+        numero = Array.from(numerosEncontrados)[0]!;
+        origemNumero = 'data_id';
+      } else {
+        numero = null;
       }
     }
 
@@ -320,9 +332,50 @@ function extrairConversa(): ConversaInfo {
 // Controle de envio para o runtime
 let ultimoPayloadJson = '';
 let debounceTimer: any = null;
+let notificacaoSeq = 0;
 
-function notificarPainel() {
+async function notificarPainel() {
+  const seq = ++notificacaoSeq;
+  const main = document.querySelector<HTMLElement>('#main');
+  if (!main) {
+    const dados: ConversaInfo = { aberta: false };
+    const json = JSON.stringify(dados);
+    if (json !== ultimoPayloadJson) {
+      ultimoPayloadJson = json;
+      try {
+        chrome.runtime
+          .sendMessage({
+            type: 'CONVERSA_ATUALIZADA',
+            payload: dados,
+          })
+          .catch(() => {});
+      } catch {}
+    }
+    return;
+  }
+
+  // 1ª leitura do título
+  const titulo1 = extrairTituloAtual();
+
+  // Espera 150 ms de intervalo para validação de estabilidade
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  if (seq !== notificacaoSeq) return;
+
+  // 2ª leitura do título
+  const titulo2 = extrairTituloAtual();
+
+  // Só envie o payload se o título for o mesmo nas duas leituras
+  if (!titulo1 || !titulo2 || titulo1 !== titulo2) {
+    return;
+  }
+
   const dados = extrairConversa();
+  if (seq !== notificacaoSeq) return;
+
+  if (dados.aberta && dados.titulo && dados.titulo !== titulo2) {
+    return;
+  }
+
   const json = JSON.stringify(dados);
   if (json !== ultimoPayloadJson) {
     ultimoPayloadJson = json;
@@ -342,9 +395,10 @@ function notificarPainel() {
 }
 
 // MutationObserver estrito apenas no corpo para capturar mudanças da conversa
+// Debounce aumentado para 400 ms
 const observer = new MutationObserver(() => {
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(notificarPainel, 250);
+  debounceTimer = setTimeout(notificarPainel, 400);
 });
 
 observer.observe(document.body, {
@@ -356,8 +410,23 @@ observer.observe(document.body, {
 // Listener para quando o side panel solicitar o estado atual imediatamente ao abrir
 chrome.runtime.onMessage.addListener((mensagem, _sender, sendResponse) => {
   if (mensagem?.type === 'GET_CONVERSA_ATUAL') {
-    const dados = extrairConversa();
-    sendResponse(dados);
+    (async () => {
+      const main = document.querySelector<HTMLElement>('#main');
+      if (!main) {
+        sendResponse({ aberta: false });
+        return;
+      }
+      const t1 = extrairTituloAtual();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const t2 = extrairTituloAtual();
+      if (!t1 || !t2 || t1 !== t2) {
+        sendResponse({ aberta: true, erro: 'nao_identificado' });
+        return;
+      }
+      const dados = extrairConversa();
+      sendResponse(dados);
+    })();
+    return true;
   }
   return true;
 });

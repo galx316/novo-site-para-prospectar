@@ -84,6 +84,15 @@ export function formatarTelefone(numero?: string | null): string {
   return `+${numero}`;
 }
 
+/**
+ * Cria a chave da conversa para detectar trocas de chat.
+ * Título da conversa (+ número, se houver).
+ */
+export function obterChaveConversa(info?: ConversaInfo | null): string {
+  if (!info || !info.aberta || !info.titulo) return '';
+  return info.numero ? `${info.titulo}:::${info.numero}` : info.titulo;
+}
+
 export function SidePanelApp() {
   const [verificandoAuth, setVerificandoAuth] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState<string | null>(null);
@@ -108,6 +117,11 @@ export function SidePanelApp() {
   const [numerosDescartados, setNumerosDescartados] = useState<Set<string>>(new Set());
   const [atalhosDias, setAtalhosDias] = useState<number[]>([3, 7, 15, 30]);
   const [marcas, setMarcas] = useState<Marca[]>([]);
+
+  // Referências para controle de concorrência e chave da conversa
+  const chaveConversaRef = useRef<string>('');
+  const chaveConversaExibidaRef = useRef<string>('');
+  const contadorBuscaRef = useRef<number>(0);
 
   // Referências para evitar dependências instáveis e re-renders em cascata
   const marcasRef = useRef<Marca[]>([]);
@@ -153,15 +167,33 @@ export function SidePanelApp() {
   // 2. Buscar dados completos do contato no Supabase (não depende de marcas)
   const buscarDadosContato = useCallback(
     async (infoConversa: ConversaInfo) => {
+      const idChamada = ++contadorBuscaRef.current;
+
+      const chaveDestaBusca = obterChaveConversa(infoConversa);
+      if (chaveDestaBusca !== chaveConversaRef.current) {
+        chaveConversaRef.current = chaveDestaBusca;
+        if (idChamada === contadorBuscaRef.current) {
+          setDadosContato(null);
+          if (chaveDestaBusca) {
+            setCarregandoConversa(true);
+          }
+        }
+      }
+
       if (!infoConversa.aberta || infoConversa.erro === 'nao_identificado') {
-        setDadosContato(null);
-        setCarregandoConversa(false);
-        setErroContato(null);
+        if (idChamada === contadorBuscaRef.current) {
+          setDadosContato(null);
+          setCarregandoConversa(false);
+          setErroContato(null);
+        }
         return;
       }
 
-      setCarregandoConversa(true);
-      setErroContato(null);
+      if (idChamada === contadorBuscaRef.current) {
+        setCarregandoConversa(true);
+        setErroContato(null);
+      }
+
       try {
         await comTimeout(
           (async () => {
@@ -176,14 +208,18 @@ export function SidePanelApp() {
               try {
                 const storageKeyNum = `numero_${infoConversa.titulo}`;
                 const resNum = await chrome.storage.local.get(storageKeyNum);
+                if (idChamada !== contadorBuscaRef.current) return;
                 if (resNum && resNum[storageKeyNum]) {
                   numeroConsulta = String(resNum[storageKeyNum]);
                   infoConversa.numero = numeroConsulta;
                   infoConversa.origemNumero = 'dados_contato';
+                  chaveConversaRef.current = obterChaveConversa(infoConversa);
                   setConversa((prev) => (prev ? { ...prev, numero: numeroConsulta, origemNumero: 'dados_contato' } : prev));
                 }
               } catch {}
             }
+
+            if (idChamada !== contadorBuscaRef.current) return;
 
             // Ignorar números descartados pelo usuário nesta conversa
             if (
@@ -200,10 +236,13 @@ export function SidePanelApp() {
             if (numeroConsulta) {
               const variantes = variantesNumeroBR(numeroConsulta);
               for (const varNumero of variantes) {
+                if (idChamada !== contadorBuscaRef.current) return;
                 const { data: rpcData, error: rpcErr } = await supabase.rpc(
                   'buscar_contato_por_whatsapp',
                   { p_numero: varNumero }
                 );
+
+                if (idChamada !== contadorBuscaRef.current) return;
 
                 if (!rpcErr && rpcData && typeof rpcData === 'object') {
                   const parsed = rpcData as any;
@@ -220,8 +259,10 @@ export function SidePanelApp() {
 
             // b) Se não houver número ou não achar: procurar em chrome.storage.local vínculo "título → contato_id"
             if (!contatoObj && infoConversa.titulo) {
+              if (idChamada !== contadorBuscaRef.current) return;
               const storageKey = `vinculo_${infoConversa.titulo}`;
               const res = await chrome.storage.local.get(storageKey);
+              if (idChamada !== contadorBuscaRef.current) return;
               const contatoIdVinculado = res && res[storageKey];
 
               if (contatoIdVinculado) {
@@ -230,6 +271,8 @@ export function SidePanelApp() {
                   .select('*')
                   .eq('id', contatoIdVinculado)
                   .single();
+
+                if (idChamada !== contadorBuscaRef.current) return;
 
                 if (cData) {
                   contatoObj = cData;
@@ -240,6 +283,7 @@ export function SidePanelApp() {
                     .select('*')
                     .eq('id', cData.cliente_id)
                     .single();
+                  if (idChamada !== contadorBuscaRef.current) return;
                   clienteObj = cliData;
 
                   // Buscar follow-up pendente
@@ -250,6 +294,7 @@ export function SidePanelApp() {
                     .eq('status', 'pendente')
                     .order('data', { ascending: true })
                     .limit(1);
+                  if (idChamada !== contadorBuscaRef.current) return;
                   followupPendenteObj = fuData?.[0] || null;
 
                   // Buscar oportunidades do contato
@@ -257,10 +302,13 @@ export function SidePanelApp() {
                     .from('oportunidades')
                     .select('*')
                     .eq('contato_id', cData.id);
+                  if (idChamada !== contadorBuscaRef.current) return;
                   oportunidadesList = opData || [];
                 }
               }
             }
+
+            if (idChamada !== contadorBuscaRef.current) return;
 
             // Se encontrou o contato:
             if (contatoObj && clienteObj) {
@@ -273,6 +321,8 @@ export function SidePanelApp() {
                 .select('*')
                 .eq('cliente_id', clienteObj.id)
                 .order('created_at', { ascending: false });
+
+              if (idChamada !== contadorBuscaRef.current) return;
 
               const todasOps = (opsCliente || oportunidadesList || []).map((op: any) => ({
                 ...op,
@@ -288,6 +338,8 @@ export function SidePanelApp() {
                 .order('created_at', { ascending: false })
                 .limit(5);
 
+              if (idChamada !== contadorBuscaRef.current) return;
+
               // Buscar último registro de whatsapp enviado para verificar aviso amarelo
               const { data: ultimoEnvioData } = await supabase
                 .from('registros')
@@ -297,6 +349,8 @@ export function SidePanelApp() {
                 .eq('direcao', 'enviado')
                 .order('created_at', { ascending: false })
                 .limit(1);
+
+              if (idChamada !== contadorBuscaRef.current) return;
 
               const ultimoEnvio = ultimoEnvioData?.[0] || null;
 
@@ -311,30 +365,40 @@ export function SidePanelApp() {
                 }
               }
 
-              setDadosContato({
-                contato: contatoObj,
-                cliente: clienteObj,
-                oportunidades: todasOps,
-                followup_pendente: followupPendenteObj,
-                ultimos_registros: regData || [],
-                aviso_resposta_pendente: avisoResposta,
-              });
+              if (idChamada === contadorBuscaRef.current) {
+                chaveConversaExibidaRef.current = obterChaveConversa(infoConversa);
+                setDadosContato({
+                  contato: contatoObj,
+                  cliente: clienteObj,
+                  oportunidades: todasOps,
+                  followup_pendente: followupPendenteObj,
+                  ultimos_registros: regData || [],
+                  aviso_resposta_pendente: avisoResposta,
+                });
+              }
             } else {
-              setDadosContato(null);
+              if (idChamada === contadorBuscaRef.current) {
+                chaveConversaExibidaRef.current = obterChaveConversa(infoConversa);
+                setDadosContato(null);
+              }
             }
           })(),
           10000,
           'Não foi possível conectar ao CRM. Verifique a internet.'
         );
       } catch (err: any) {
-        console.error('Erro ao buscar dados do contato:', err);
-        setErroContato('Não foi possível conectar ao CRM. Verifique a internet.');
-        setDadosContato(null);
+        if (idChamada === contadorBuscaRef.current) {
+          console.error('Erro ao buscar dados do contato:', err);
+          setErroContato('Não foi possível conectar ao CRM. Verifique a internet.');
+          setDadosContato(null);
+        }
       } finally {
-        setCarregandoConversa(false);
+        if (idChamada === contadorBuscaRef.current) {
+          setCarregandoConversa(false);
+        }
       }
     },
-    []
+    [numerosDescartados]
   );
 
   // 3. Solicitar conversa ativa da aba aberta do WhatsApp (deps estáveis)
@@ -386,6 +450,15 @@ export function SidePanelApp() {
           }
 
           // Conversa aberta
+          const novaChave = obterChaveConversa(resposta);
+          if (novaChave !== chaveConversaRef.current) {
+            chaveConversaRef.current = novaChave;
+            chaveConversaExibidaRef.current = '';
+            setDadosContato(null);
+            if (novaChave) {
+              setCarregandoConversa(true);
+            }
+          }
           setEstadoAba('ok');
           setConversa(resposta);
           buscarDadosContato(resposta);
@@ -499,6 +572,15 @@ export function SidePanelApp() {
     const listener = (mensagem: any) => {
       if (mensagem?.type === 'CONVERSA_ATUALIZADA' && mensagem.payload) {
         const payload: ConversaInfo = mensagem.payload;
+        const novaChave = obterChaveConversa(payload);
+        if (novaChave !== chaveConversaRef.current) {
+          chaveConversaRef.current = novaChave;
+          chaveConversaExibidaRef.current = '';
+          setDadosContato(null);
+          if (novaChave) {
+            setCarregandoConversa(true);
+          }
+        }
         setConversa(payload);
         if (autorizado) {
           if (!payload.aberta) {
@@ -602,6 +684,42 @@ export function SidePanelApp() {
     buscarDadosContato(novaConversa);
     showToast('Número descartado.', 'info');
   }
+
+  const validarConversaAtual = useCallback((): boolean => {
+    const chaveAtual = chaveConversaRef.current;
+    const chaveExibida = chaveConversaExibidaRef.current;
+    if (!chaveAtual || !chaveExibida || chaveAtual !== chaveExibida) {
+      showToast('A conversa mudou. Atualizando…', 'aviso');
+      handleRecarregar();
+      return false;
+    }
+    return true;
+  }, []);
+
+  const handleNaoEEsteContato = useCallback(async () => {
+    if (!conversa?.titulo) return;
+    const tit = conversa.titulo;
+    const chaveNum = `numero_${tit}`;
+    const chaveVinculo = `vinculo_${tit}`;
+    try {
+      await chrome.storage.local.remove([chaveNum, chaveVinculo]);
+      if (conversa.numero) {
+        const chaveDescarte = `${tit}_${conversa.numero}`;
+        setNumerosDescartados((prev) => new Set(prev).add(chaveDescarte));
+      }
+      setNumeroSalvoNoCache(null);
+      setVinculoSalvoNoCache(null);
+      setDadosContato(null);
+      const novaConversa: ConversaInfo = { ...conversa, numero: null, origemNumero: null };
+      chaveConversaRef.current = obterChaveConversa(novaConversa);
+      chaveConversaExibidaRef.current = '';
+      setConversa(novaConversa);
+      showToast('Contato desvinculado desta conversa.', 'info');
+      buscarDadosContato(novaConversa);
+    } catch (err: any) {
+      showToast('Erro ao desvincular dados da conversa.', 'erro');
+    }
+  }, [conversa, buscarDadosContato]);
 
   async function handleEsquecerNumeroDestaConversa() {
     if (!conversa?.titulo) return;
@@ -724,6 +842,23 @@ export function SidePanelApp() {
         onAbrirOpcoes={() => setModalOpcoesAberto(true)}
         carregando={carregandoConversa}
       />
+
+      {/* Topo do painel: Conversa ativa para conferência do usuário */}
+      {conversa?.aberta && conversa?.titulo && (
+        <div className="barra-topo-conversa">
+          <div className="barra-topo-conversa-conteudo">
+            <span className="barra-topo-rotulo">Conversa:</span>
+            <span className="barra-topo-titulo" title={conversa.titulo}>
+              {conversa.titulo}
+            </span>
+            {conversa.numero && (
+              <span className="barra-topo-numero">
+                ({formatarTelefone(conversa.numero)})
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <main className="panel-content">
         {/* Banner de confirmação de número lido nos Dados do contato */}
@@ -864,6 +999,8 @@ export function SidePanelApp() {
             conversa={conversa}
             atalhosDias={atalhosDias}
             onAtualizar={handleRecarregar}
+            onNaoEEsteContato={handleNaoEEsteContato}
+            onValidarConversa={validarConversaAtual}
           />
         )}
 

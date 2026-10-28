@@ -11,6 +11,7 @@ interface DialogFollowupProps {
   contatoNome: string;
   followupPendente: Followup | null;
   atalhosDias?: number[];
+  onValidarConversa?: () => boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -21,6 +22,7 @@ export function DialogFollowup({
   contatoNome,
   followupPendente,
   atalhosDias = [3, 7, 15, 30],
+  onValidarConversa,
   onClose,
   onSuccess,
 }: DialogFollowupProps) {
@@ -35,6 +37,12 @@ export function DialogFollowup({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (onValidarConversa && !onValidarConversa()) {
+      onClose();
+      return;
+    }
+
     if (!novaData) {
       showToast('Selecione uma data para o follow-up.', 'erro');
       return;

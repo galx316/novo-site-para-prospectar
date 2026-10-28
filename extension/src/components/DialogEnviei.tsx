@@ -10,6 +10,7 @@ interface DialogEnvieiProps {
   contatoNome: string;
   oportunidades: Oportunidade[];
   atalhosDias?: number[];
+  onValidarConversa?: () => boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -19,6 +20,7 @@ export function DialogEnviei({
   contatoNome,
   oportunidades,
   atalhosDias = [3, 7, 15, 30],
+  onValidarConversa,
   onClose,
   onSuccess,
 }: DialogEnvieiProps) {
@@ -39,6 +41,12 @@ export function DialogEnviei({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (onValidarConversa && !onValidarConversa()) {
+      onClose();
+      return;
+    }
+
     setCarregando(true);
 
     try {

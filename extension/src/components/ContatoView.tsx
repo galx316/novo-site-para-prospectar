@@ -15,6 +15,8 @@ interface ContatoViewProps {
   conversa: ConversaInfo;
   atalhosDias?: number[];
   onAtualizar: () => void;
+  onNaoEEsteContato?: () => void;
+  onValidarConversa?: () => boolean;
 }
 
 const ETAPA_LABELS: Record<string, string> = {
@@ -40,7 +42,14 @@ const TIPO_REGISTRO_LABELS: Record<string, { label: string; icon: string }> = {
   problema: { label: 'Problema', icon: '⚠️' },
 };
 
-export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onAtualizar }: ContatoViewProps) {
+export function ContatoView({
+  dados,
+  conversa,
+  atalhosDias = [3, 7, 15, 30],
+  onAtualizar,
+  onNaoEEsteContato,
+  onValidarConversa,
+}: ContatoViewProps) {
   const [modalEnvieiAberto, setModalEnvieiAberto] = useState(false);
   const [modalRespondeuAberto, setModalRespondeuAberto] = useState(false);
   const [modalFollowupAberto, setModalFollowupAberto] = useState(false);
@@ -48,6 +57,26 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
   const [salvandoNumero, setSalvandoNumero] = useState(false);
 
   const { contato, cliente, oportunidades, followup_pendente, ultimos_registros, aviso_resposta_pendente } = dados;
+
+  function abrirEnviei() {
+    if (onValidarConversa && !onValidarConversa()) return;
+    setModalEnvieiAberto(true);
+  }
+
+  function abrirRespondeu() {
+    if (onValidarConversa && !onValidarConversa()) return;
+    setModalRespondeuAberto(true);
+  }
+
+  function abrirFollowup() {
+    if (onValidarConversa && !onValidarConversa()) return;
+    setModalFollowupAberto(true);
+  }
+
+  function abrirAtividade() {
+    if (onValidarConversa && !onValidarConversa()) return;
+    setModalAtividadeAberto(true);
+  }
 
   async function handleSalvarNumeroContato() {
     if (!conversa.numero || salvandoNumero) return;
@@ -152,7 +181,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
       )}
 
       {/* Cartão da Construtora e Contato */}
-      <div className="card-secao">
+      <div className="card-secao card-contato-principal">
         <div className="secao-header">
           <div>
             <span className="label-secao">Construtora</span>
@@ -186,13 +215,27 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
             ) : null}
           </div>
         </div>
+
+        {/* Botão Não é este contato no card do contato */}
+        {onNaoEEsteContato && (
+          <div className="card-contato-desvincular">
+            <button
+              type="button"
+              className="btn-nao-e-contato"
+              onClick={onNaoEEsteContato}
+              title="Desvincular este contato desta conversa"
+            >
+              Não é este contato
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Barra de Ações Rápidas */}
       <div className="botoes-acao-grid">
         <button
           className="btn-acao btn-enviei"
-          onClick={() => setModalEnvieiAberto(true)}
+          onClick={abrirEnviei}
           title="Registrar envio de apresentação"
         >
           <span className="btn-acao-icon">📤</span>
@@ -201,7 +244,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
 
         <button
           className="btn-acao btn-respondeu"
-          onClick={() => setModalRespondeuAberto(true)}
+          onClick={abrirRespondeu}
           title="Registrar retorno/resposta do cliente"
         >
           <span className="btn-acao-icon">💬</span>
@@ -210,7 +253,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
 
         <button
           className="btn-acao btn-followup"
-          onClick={() => setModalFollowupAberto(true)}
+          onClick={abrirFollowup}
           title={followup_pendente ? 'Remarcar próximo contato' : 'Agendar próximo contato'}
         >
           <span className="btn-acao-icon">📅</span>
@@ -219,7 +262,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
 
         <button
           className="btn-acao btn-atividade"
-          onClick={() => setModalAtividadeAberto(true)}
+          onClick={abrirAtividade}
           title="Registrar ligação, visita, nota ou outro"
         >
           <span className="btn-acao-icon">📝</span>
@@ -345,6 +388,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
           contatoNome={contato.nome}
           oportunidades={oportunidades}
           atalhosDias={atalhosDias}
+          onValidarConversa={onValidarConversa}
           onClose={() => setModalEnvieiAberto(false)}
           onSuccess={() => {
             setModalEnvieiAberto(false);
@@ -358,6 +402,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
           contatoId={contato.id}
           contatoNome={contato.nome}
           oportunidades={oportunidades}
+          onValidarConversa={onValidarConversa}
           onClose={() => setModalRespondeuAberto(false)}
           onSuccess={() => {
             setModalRespondeuAberto(false);
@@ -373,6 +418,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
           contatoNome={contato.nome}
           followupPendente={followup_pendente}
           atalhosDias={atalhosDias}
+          onValidarConversa={onValidarConversa}
           onClose={() => setModalFollowupAberto(false)}
           onSuccess={() => {
             setModalFollowupAberto(false);
@@ -386,6 +432,7 @@ export function ContatoView({ dados, conversa, atalhosDias = [3, 7, 15, 30], onA
           contatoId={contato.id}
           clienteId={cliente.id}
           contatoNome={contato.nome}
+          onValidarConversa={onValidarConversa}
           onClose={() => setModalAtividadeAberto(false)}
           onSuccess={() => {
             setModalAtividadeAberto(false);

@@ -9,6 +9,7 @@ interface DialogRespondeuProps {
   contatoId: string;
   contatoNome: string;
   oportunidades: Oportunidade[];
+  onValidarConversa?: () => boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -17,6 +18,7 @@ export function DialogRespondeu({
   contatoId,
   contatoNome,
   oportunidades,
+  onValidarConversa,
   onClose,
   onSuccess,
 }: DialogRespondeuProps) {
@@ -74,6 +76,11 @@ export function DialogRespondeu({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (onValidarConversa && !onValidarConversa()) {
+      onClose();
+      return;
+    }
 
     if (situacao === 'demanda_prevista' && !mesAnoNecessidade) {
       showToast('Informe o mês e ano da demanda prevista.', 'erro');
